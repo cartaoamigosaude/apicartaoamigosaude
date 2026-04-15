@@ -1,0 +1,5234 @@
+<?php
+
+namespace App\Helpers;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Hash;
+use Laravel\Passport\Client;
+use Illuminate\Validation\ValidationException;;
+use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
+use App\Helpers\Cas;
+use Carbon\Carbon;
+use DB;
+use stdClass;
+ use App\Jobs\CelCashParcelaAvulsaJob;
+class CelCash
+{
+
+	public static function AuthorizationBasic($id)
+	{
+        $authorization      = "";
+        $celcash 	        = DB::connection('mysql')
+                                ->table('celcash')
+                                ->select('galaxId','galaxHash')
+                                ->where('id','=',$id)
+                                ->first();
+
+        if  (!isset($celcash->id))
+        {
+            $authorization  = base64_encode( $celcash->galaxId . ':' . $celcash->galaxHash);
+        }
+
+        return  $authorization;
+
+	}
+
+    public static function AuthorizationPadrao()
+	{
+        $galaxId            = 0;
+        $celcash 	        = DB::connection('mysql')
+                                ->table('celcash')
+                                ->select('galaxId','galaxHash')
+                                ->where('padrao','=',1)
+                                ->first();
+
+        if  (!isset($celcash->id))
+        {
+            $galaxId        = $celcash->galaxId;
+        }
+
+        return   $galaxId;
+
+	}
+
+	public static function Token($id=1)
+    {
+        $authorization                          = CelCash::AuthorizationBasic($id);
+
+        if ($authorization =="")
+        {
+            $retorno 						    = new stdClass();
+            $retorno->error 		            = true;
+            $retorno->message		            = "Nao foi encontrato autorizaçao para o Cel Cash ID: $id";
+            return $retorno;
+        }
+  
+        $cache 								    = \Cache::get($authorization);
+			
+		if (isset($cache->expires_in))
+		{
+        	if (date("Y-m-d H:i:s") >= $cache->expires_in)
+			{
+				\Cache::forget($authorization);
+			} else {
+                return $cache;
+            }
+        } else {
+            \Cache::forget($authorization);
+        }
+
+        $url                                    = "https://api-celcash.celcoin.com.br/v2";
+        $token         						    = \Cache::rememberForever($authorization, function () use ($url,$authorization)
+        {
+                $endpoint                       = $url . "/token";
+                $retorno 						= new stdClass();
+
+                try {
+                    $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Basic $authorization",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, [
+                                                    'grant_type'    => 'authorization_code',
+                                                    'scope'         => 'customers.read customers.write plans.read plans.write transactions.read transactions.write webhooks.write balance.read balance.write cards.read cards.write card-brands.read subscriptions.read subscriptions.write charges.read charges.write boletos.read carnes.read',
+                                                ]);
+                    $statcode					= $hresponse->status();
+                    $response 					= $hresponse->object();
+                } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                    $retorno->error 			= true;
+                    $retorno->statcode			= 500;
+                    $retorno->message 			= $e;
+                    return $retorno;
+                } catch (RequestException $e) {
+                    $retorno->error 			= true;
+                    $retorno->statcode			= 500;
+                    $retorno->message 			= $e;
+                    return $retorno;
+                }
+                
+                switch ($statcode)
+                {
+                    case 200:
+                        $retorno->token			= $response->access_token;
+                        $agora					= date("Y-m-d H:i:s");
+                        $seconds                = $response->expires_in -1;
+                        $expires_in				= Carbon::parse($agora)->addSeconds($seconds);		
+                        $retorno->expires_in    = $expires_in->format('Y-m-d H:i:s');					
+                        break;
+                    case 400:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Erro não identificado";
+                        $retorno->response 		= $response;
+                        break;
+                    case 403:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Usuário sem permissão. Verifique se o IP do servidor de API foi liberado pelo Banco.";
+                        $retorno->response      = $response;
+                        break;
+                    default:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Erro não identificado";
+                        $retorno->response      = $response;
+                        break;
+                }
+                $retorno->statcode			    = $statcode;
+                $retorno->url                   = $url;
+			    return $retorno;
+            
+        });		
+
+        return $token;
+	}
+	
+	public static function TokenAgendamento($id=2)
+    {
+        $authorization                          = CelCash::AuthorizationBasic($id);
+
+        if ($authorization =="")
+        {
+            $retorno 						    = new stdClass();
+            $retorno->error 		            = true;
+            $retorno->message		            = "Nao foi encontrato autorizaçao para o Cel Cash ID: $id";
+            return $retorno;
+        }
+  
+        $cache 								    = \Cache::get($authorization);
+			
+		if (isset($cache->expires_in))
+		{
+        	if (date("Y-m-d H:i:s") >= $cache->expires_in)
+			{
+				\Cache::forget($authorization);
+			} else {
+                return $cache;
+            }
+        } else {
+            \Cache::forget($authorization);
+        }
+
+        $url                                    = "https://api-celcash.celcoin.com.br/v2";
+        $token         						    = \Cache::rememberForever($authorization, function () use ($url,$authorization)
+        {
+                $endpoint                       = $url . "/token";
+                $retorno 						= new stdClass();
+
+                try {
+                    $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Basic $authorization",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, [
+                                                    'grant_type'    => 'authorization_code',
+                                                    'scope'         => 'customers.read customers.write plans.read plans.write transactions.read transactions.write webhooks.write balance.read balance.write cards.read cards.write card-brands.read subscriptions.read subscriptions.write charges.read charges.write boletos.read carnes.read',
+                                                ]);
+                    $statcode					= $hresponse->status();
+                    $response 					= $hresponse->object();
+                } catch (\Illuminate\Http\Client\ConnectionException $e) {
+                    $retorno->error 			= true;
+                    $retorno->statcode			= 500;
+                    $retorno->message 			= $e;
+                    return $retorno;
+                } catch (RequestException $e) {
+                    $retorno->error 			= true;
+                    $retorno->statcode			= 500;
+                    $retorno->message 			= $e;
+                    return $retorno;
+                }
+                
+                switch ($statcode)
+                {
+                    case 200:
+                        $retorno->token			= $response->access_token;
+                        $agora					= date("Y-m-d H:i:s");
+                        $seconds                = $response->expires_in -1;
+                        $expires_in				= Carbon::parse($agora)->addSeconds($seconds);		
+                        $retorno->expires_in    = $expires_in->format('Y-m-d H:i:s');					
+                        break;
+                    case 400:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Erro não identificado";
+                        $retorno->response 		= $response;
+                        break;
+                    case 403:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Usuário sem permissão. Verifique se o IP do servidor de API foi liberado pelo Banco.";
+                        $retorno->response      = $response;
+                        break;
+                    default:
+                        $retorno->error 		= true;
+                        $retorno->message		= "Erro não identificado";
+                        $retorno->response      = $response;
+                        break;
+                }
+                $retorno->statcode			    = $statcode;
+                $retorno->url                   = $url;
+			    return $retorno;
+            
+        });		
+
+        return $token;
+	}
+
+    public static function GetCustomer($cpfcnpj,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+        $endpoint                       .= "?documents=";
+        $endpoint                       .= $cpfcnpj;
+        $endpoint                       .= "&startAt=0&limit=100";
+
+        $retorno 						= new stdClass();
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+        return $response;
+
+    }
+	
+    public static function ListCustomers($query,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+        $endpoint                       .= "?";
+        $endpoint                       .= $query;
+
+        $retorno 						= new stdClass();
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+        return $response;
+
+    }
+
+    public static function CelCashMigrarClientes($galaxId)
+    {
+        if (\Cache::has('cel_cash_startAt'))
+        {
+            $cel_cash_startAt           = \Cache::get('cel_cash_startAt');
+        } else {
+            $cel_cash_startAt           = 0;
+            \Cache::forever('cel_cash_startAt',$cel_cash_startAt);
+        }
+
+        $query                           = "startAt=" . $cel_cash_startAt . "&limit=100";
+
+       // Log::info("celcash", ['query' => $query ]);
+
+        $customers                       = CelCash::ListCustomers($query,$galaxId);
+
+        if (isset($customers->Customers))
+        {
+            foreach ($customers->Customers as $customer)
+            {
+                $cliente                = CelCash::CelCashMigrarCliente($customer,$galaxId);
+                if ($cliente->ok)
+                {
+                    $cel_cash_startAt   = $cel_cash_startAt + 1;
+                    \Cache::forever('cel_cash_startAt', $cel_cash_startAt);
+                } else {
+                    break;
+                }
+            }
+            //Log::info("celcash", ['totalQtdFoundInPage' =>  $customers->totalQtdFoundInPage ]);
+			if ($customers->totalQtdFoundInPage ==0)
+			{
+				$cel_cash_startAt       = 0;
+				\Cache::forever('cel_cash_startAt',$cel_cash_startAt);
+			}
+            return $customers->totalQtdFoundInPage;
+        } else {
+            Log::info("celcash", ['customers' => $customers ]);
+        }
+
+        return 0;
+
+    }
+
+    public static function CelCashMigrarCliente($celcash,$galaxId=1)
+    {
+
+        $retorno 				    = new stdClass();
+        $retorno->ok 		        = true;
+        $retorno->cliente_id        = 0;
+        $retorno->tipo              = "";
+        $retorno->galaxPayId        = $celcash->galaxPayId;
+
+        $data_nascimento            = "1900-01-01";
+        $sexo                       = "F";
+
+        if (isset($celcash->ExtraFields))
+        {
+            foreach ($celcash->ExtraFields as $extrafield)
+            {
+                switch ($extrafield->tagName) {
+                    case 'CP_DATA_NASCIMENTO':
+                        list($dia,$mes,$ano)        = explode("/", $extrafield->tagValue);
+                        $data_nascimento            = $ano . "-" . $mes . "-" . $dia;
+                        break;
+                    case 'CP_SEXO':
+                        $sexo                       = substr($extrafield->tagValue,0,1);
+                        break;
+                }
+            }
+        }
+
+        $cliente                    = \App\Models\Cliente::where('cpfcnpj','=',$celcash->document)->first();
+
+        if (isset($cliente->id))     
+        {
+            $retorno->cliente_id   = $cliente->id;
+            $retorno->tipo         = $cliente->tipo;
+            return $retorno;
+        }                               
+
+        $cliente            		= new \App\Models\Cliente();
+
+        if (strlen($celcash->document) <= 11)
+        {
+            $cliente->tipo          = "F";
+        } else {
+            $cliente->tipo          = "J";
+        }
+        $cliente->cpfcnpj           = $celcash->document;
+        $cliente->nome              = $celcash->name;
+        if ((isset($celcash->phones)) and (is_array($celcash->phones)) and (!empty($celcash->phones)))
+        { 
+            $cliente->telefone      = $celcash->phones[0];
+        } else {
+            $cliente->telefone      = "";
+        }
+        if ((isset($celcash->emails)) and (is_array($celcash->emails)) and (!empty($celcash->emails)))
+        { 
+            $cliente->email         = $celcash->emails[0];
+        } else {
+            $cliente->email         = "";
+        }
+
+        $cliente->data_nascimento   = $data_nascimento;
+        $cliente->sexo              = $sexo;
+
+        if (isset($celcash->Address->zipCode))
+        {
+            $cliente->cep           = Cas::nulltoSpace($celcash->Address->zipCode);
+        } else {
+            $cliente->cep           = "";
+        }
+        if (isset($celcash->Address->street))
+        {
+            $cliente->logradouro    = Cas::nulltoSpace($celcash->Address->street);
+        } else {
+            $cliente->logradouro    = "";
+        }
+        if (isset($celcash->Address->number))
+        {
+            if (strlen($celcash->Address->number) > 20)
+            {
+                $cliente->numero    = Cas::nulltoSpace(substr($celcash->Address->number,0,20));
+            } else  {
+                $cliente->numero    = Cas::nulltoSpace($celcash->Address->number);
+            }
+        } else {
+            $cliente->numero        = "";
+        }
+        if (isset($celcash->Address->complement))
+        {
+            $cliente->complemento   = Cas::nulltoSpace($celcash->Address->complement);
+        } else {
+            $cliente->complemento   = "";
+        }
+        if (isset($celcash->Address->neighborhood))
+        {
+            $cliente->bairro        = Cas::nulltoSpace($celcash->Address->neighborhood);
+        } else {
+            $cliente->bairro        = "";
+        }
+        if (isset($celcash->Address->city))
+        {
+            $cliente->cidade        = Cas::nulltoSpace($celcash->Address->city);
+        } else {
+            $cliente->cidade        = "";
+        }
+        if (isset($celcash->Address->state))
+        {
+            $cliente->estado        = Cas::nulltoSpace($celcash->Address->state);
+        } else {
+            $cliente->estado        = "";
+        }
+
+        $cliente->galaxPayId        = $celcash->galaxPayId;
+        $cliente->ativo             = true;
+
+        if (isset($celcash->status))
+        {
+            $cliente->observacao    = $celcash->status;
+        } else {
+            $cliente->observacao    = "";
+        }
+
+        try {
+            $cliente->save();
+        } catch (QueryException $e) {
+           Log::info("celcash", ['cliente' => $celcash ]);
+           $retorno->ok 		   = false;
+        }	
+
+        $retorno->cliente_id        = $cliente->id;
+        $retorno->tipo              = $cliente->tipo;
+        return $retorno;
+        
+    }
+
+    public static function GetSubscription($galaxPayIds,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        //Log::info("celcash", ['token' => $token ]);
+        
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/subscriptions";
+        $endpoint                       .= "?galaxPayIds=";
+        $endpoint                       .= $galaxPayIds;
+        $endpoint                       .= "&startAt=0&limit=100";
+
+        $retorno 						= new stdClass();
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+        return $response;
+
+    }
+    
+	 public static function GetCharges($query,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        //Log::info("celcash", ['ctoken' => $token ]);
+        
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/charges";
+        $endpoint                       .= "?";
+        $endpoint                       .= $query;
+
+        $retorno 						= new stdClass();
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+		$response->token             	= $token->token;
+        return $response;
+
+    }
+	
+    public static function GetSubscriptions($query,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        //Log::info("celcash", ['ctoken' => $token ]);
+        
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/subscriptions";
+        $endpoint                       .= "?";
+        $endpoint                       .= $query;
+
+        $retorno 						= new stdClass();
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+        return $response;
+
+    }
+
+    public static function CelCashMigrarVendedor($celcash,$galaxId=1)
+    {
+        $retorno 				        = new stdClass();
+        $retorno->ok 		            = true;
+        $retorno->vendedor_id           = 0;
+
+        $nome                           = "";
+
+        if (isset($celcash->ExtraFields))
+        {
+            foreach ($celcash->ExtraFields as $extrafield)
+            {
+                switch ($extrafield->tagName) {
+                    case 'CP_VENDEDOR':
+                        $nome          = $extrafield->tagValue;
+                        break;
+                }
+            }
+        }
+
+        if ($nome == "")
+        {
+            $retorno->ok 		        = false;
+            return $retorno;
+        }
+
+        $vendedor                       = \App\Models\Vendedor::where('nome','=',$nome)->first();
+
+        if (isset($vendedor->id))     
+        {
+            $retorno->ok 		        = true;
+            $retorno->vendedor_id       = $vendedor->id;
+            return $retorno;
+        }
+
+        $vendedor            		    = new \App\Models\Vendedor();
+        $vendedor->nome                 = $nome;
+        $vendedor->ativo                = true;
+        $vendedor->user_id              = 1;
+
+        try {
+            $vendedor->save();
+        } catch (QueryException $e) {
+           Log::info("celcash", ['vendedor' => $vendedor]);
+           $retorno->ok 		        = false;
+           return $retorno;
+        }	
+
+        $retorno->ok 		        = true;
+        $retorno->vendedor_id       = $vendedor->id;
+        return $retorno;
+    }
+	
+	public static function CelCashMigrarVendas($galaxId)
+    {
+ 
+		if (\Cache::has('cel_cash_vstartAt'))
+        {
+            $cel_cash_startAt           = \Cache::get('cel_cash_vstartAt');
+        } else {
+            $cel_cash_startAt           = 0;
+            \Cache::forever('cel_cash_vstartAt',$cel_cash_startAt);
+        }
+
+        $query                           = "startAt=" . $cel_cash_startAt . "&limit=100";
+
+        //Log::info("vcelcash", ['cquery' => $query ]);
+
+        $subscriptions                  = CelCash::GetCharges($query,$galaxId);
+
+		//Log::info("charges", ['charges' => $subscriptions ]);
+ 
+        if (isset($subscriptions->Charges))
+        {
+            foreach ($subscriptions->Charges as $subscription)
+            {
+                $contrato               = CelCash::CelCashMigrarContrato($subscription,$galaxId,'V');
+                if ($contrato->ok)
+                {
+                    $cel_cash_startAt   = $cel_cash_startAt + 1;
+                    \Cache::forever('cel_cash_vstartAt', $cel_cash_startAt);
+                } else {
+                    break;
+                }
+            }
+			if ($subscriptions->totalQtdFoundInPage ==0)
+			{
+				$cel_cash_startAt       = 0;
+				\Cache::forever('cel_cash_vstartAt',$cel_cash_startAt);
+			}
+            return $subscriptions->totalQtdFoundInPage;
+        } 
+
+        //Log::info("ccelcash", ['subscriptions' => $subscriptions ]);
+
+        return 0;
+	}
+
+    public static function CelCashMigrarContratos($galaxId)
+    {
+        if (\Cache::has('cel_cash_cstartAt'))
+        {
+            $cel_cash_startAt           = \Cache::get('cel_cash_cstartAt');
+        } else {
+            $cel_cash_startAt           = 3000;
+            \Cache::forever('cel_cash_cstartAt',$cel_cash_startAt);
+        }
+
+		//$cel_cash_startAt           = 0;
+
+        $query                           = "startAt=" . $cel_cash_startAt . "&limit=100";
+
+        //Log::info("ccelcash", ['cquery' => $query ]);
+
+        $subscriptions                  = CelCash::GetSubscriptions($query,$galaxId);
+
+        if (isset($subscriptions->Subscriptions))
+        {
+            foreach ($subscriptions->Subscriptions as $subscription)
+            {
+                $contrato                = CelCash::CelCashMigrarContrato($subscription,$galaxId,'C');
+                if ($contrato->ok)
+                {
+                    $cel_cash_startAt   = $cel_cash_startAt + 1;
+                    \Cache::forever('cel_cash_cstartAt', $cel_cash_startAt);
+                } else {
+                    break;
+                }
+            }
+			if ($subscriptions->totalQtdFoundInPage ==0)
+			{
+				$cel_cash_startAt       = 0;
+				\Cache::forever('cel_cash_cstartAt',$cel_cash_startAt);
+			}
+            return $subscriptions->totalQtdFoundInPage;
+        } 
+
+       // Log::info("ccelcash", ['subscriptions' => $subscriptions ]);
+
+        return 0;
+
+    }
+
+    public static function CelCashMigrarContrato($celcash,$galaxId=1,$tipocontrato='C')
+    {
+       
+	   // Log::info("CelCashMigrarContrato", ['CelCashMigrarContrato' => $celcash ]);
+
+        $retorno 				                    = new stdClass();
+        $retorno->ok 		                        = true;
+        $retorno->contrato_id                       = 0;
+        $retorno->galaxPayId                        = $celcash->galaxPayId;
+
+		if ($celcash->status == "closed")
+		{
+			$contrato                               = \App\Models\Contrato::where('galaxPayId','=',$celcash->galaxPayId)
+																		  ->where('tipocontrato','=',$tipocontrato)
+                                                                          ->first();
+      
+			if (isset($contrato->id))
+			{
+				$contrato->status				    = $celcash->status;
+				$contrato->save();
+			}
+			Log::info("closed", ['Cliente' => $celcash->Customer ]);
+            $retorno->ok 		                    = false;
+            return $retorno;
+		}
+		
+        $cliente                                    = CelCash::CelCashMigrarCliente($celcash->Customer,$galaxId);
+        
+        if (!$cliente->ok)
+        {
+            Log::info("CelCashMigrarContrato", ['Cliente' => $celcash->Customer ]);
+            $retorno->ok 		                    = false;
+            return $retorno;
+        }
+
+        $plano_id                                   = 6;
+
+        if (isset($celcash->planGalaxPayId))
+        {
+            $plano                                  = \App\Models\Plano::where('galaxPayId','=',$celcash->planGalaxPayId)
+                                                                            ->first();
+            if (isset($plano->id))
+            {
+                $plano_id                          = $plano->id;
+            }
+        }
+
+        $situacao_id                                = 7;
+        $situacao                                   = \App\Models\Situacao::where('status','=',$celcash->status)
+                                                                            ->first();
+        if (!isset($situacao->id))
+        {
+            $situacao            		            = new \App\Models\Situacao();
+            $situacao->status                       = $celcash->status;
+            $situacao->nome                         = $celcash->status;
+            $situacao->ativo                        = true;
+            $situacao->save();
+        }
+
+        $situacao_id                                = $situacao->id;
+        $vendedor                                   = CelCash::CelCashMigrarVendedor($celcash,$galaxId=1);
+        $contrato_tipo 								= "";
+		
+        $contrato                                   = \App\Models\Contrato::where('galaxPayId','=',$celcash->galaxPayId)
+																		  ->where('tipocontrato','=',$tipocontrato)
+                                                                          ->first();
+        $novo                                       = false;
+
+        if (!isset($contrato->id))
+        {
+            $contrato            		            = new \App\Models\Contrato();
+            $novo                                   = true;
+        } else {
+			$contrato_tipo							= $contrato->tipo;
+		}
+
+		if ($contrato_tipo != "J")
+		{
+			$contrato->tipo				                = $cliente->tipo;			
+			$contrato->cliente_id		                = $cliente->cliente_id;
+			$contrato->plano_id			                = $plano_id;
+			if (isset($celcash->firstPayDayDate))
+			{
+				$contrato->vigencia_inicio		        = $celcash->firstPayDayDate;
+			} else {
+				$celcash->firstPayDayDate				= date('Y-m-d h:i:s');
+				if ($novo)
+				{
+					$contrato->vigencia_inicio		    = "2024-01-01";
+				}
+			}
+			
+			if ($novo)
+			{
+				$contrato->vigencia_fim		            = "2099-12-31";
+			}
+			if ($vendedor->vendedor_id ==0)
+			{
+				$vendedor->vendedor_id                  = 1;
+			}
+			$contrato->vendedor_id			            = $vendedor->vendedor_id;
+			$contrato->valor				            = ($celcash->value / 100);
+			$contrato->galaxPayId			            = $celcash->galaxPayId;
+			$contrato->status				            = $celcash->status;
+		}
+        $contrato->paymentLink			            	= $celcash->paymentLink;
+        $contrato->mainPaymentMethodId              	= Cas::nulltoSpace($celcash->mainPaymentMethodId);
+		if (isset($celcash->quantity))
+		{
+			$contrato->quantity			            = $celcash->quantity;
+		} else {
+			$contrato->quantity			            = 1;
+		}
+		if (isset($celcash->periodicity))
+		{
+			$contrato->periodicity			        = $celcash->periodicity;
+		} else {
+			$contrato->periodicity					= 1;
+		}
+		if (isset($celcash->firstPayDayDate))
+		{
+			$contrato->firstPayDayDate		        = $celcash->firstPayDayDate;
+		}
+		if (isset($celcash->additionalInfo))
+		{
+			$contrato->additionalInfo		        = Cas::nulltoSpace($celcash->additionalInfo);
+		} else {
+			$contrato->additionalInfo		        = "";
+		}
+		
+        $contrato->situacao_id			            = $situacao_id;
+
+        if (isset($celcash->PaymentMethodBoleto))
+        {
+            if (isset($celcash->PaymentMethodBoleto->fine))
+            {
+                $contrato->paymentMethodBoletofine          = $celcash->PaymentMethodBoleto->fine;
+            } else {
+                $contrato->paymentMethodBoletofine          = 0;
+            }
+
+            if (isset($celcash->PaymentMethodBoleto->interest))
+            {
+                $contrato->paymentMethodBoletointerest      = $celcash->PaymentMethodBoleto->interest;
+            } else {
+                $contrato->paymentMethodBoletointerest      = 0;
+            }
+            if (isset($celcash->PaymentMethodBoleto->instructions))
+            {
+                $contrato->paymentMethodBoletoinstructions  = Cas::nulltoSpace($celcash->PaymentMethodBoleto->instructions);
+            } else {
+                $contrato->paymentMethodBoletoinstructions  = "";
+            }
+            if (isset($celcash->PaymentMethodBoleto->deadlineDays))
+            {
+                $contrato->paymentMethodBoletodeadlineDays  = $celcash->PaymentMethodBoleto->deadlineDays;
+            } else {
+                $contrato->paymentMethodBoletodeadlineDays  = 0;
+            }
+            if (isset($celcash->PaymentMethodBoleto->documentNumber))
+            {
+                $contrato->paymentMethodBoletodocumentNumber = Cas::nulltoSpace($celcash->PaymentMethodBoleto->documentNumber);
+            } else {
+                 $contrato->paymentMethodBoletodocumentNumber= "";
+            }
+        } else {
+            if ($novo)
+            {
+                $contrato->paymentMethodBoletofine           = 0;
+                $contrato->paymentMethodBoletointerest       = 0;
+                $contrato->paymentMethodBoletoinstructions   = "";
+                $contrato->paymentMethodBoletodeadlineDays   = 0;
+                $contrato->paymentMethodBoletodocumentNumber = "";
+            }
+        }
+
+        if (isset($celcash->Contract))
+        {
+            if (isset($celcash->Contract->name))
+            {
+                $contrato->contractname            = Cas::nulltoSpace($celcash->Contract->name);
+            } else {
+                $contrato->contractname            = "";
+            }
+            if (isset($celcash->Contract->document))
+            {
+                $contrato->contractdocument        = Cas::nulltoSpace($celcash->Contract->document);
+            } else {
+                $contrato->contractdocument        = "";
+            }
+            if (isset($celcash->Contract->ip))
+            {
+                $contrato->contractip              = Cas::nulltoSpace($celcash->Contract->ip);
+            } else {
+                $contrato->contractip              = "";
+            }
+            if (isset($celcash->Contract->acceptedAt))
+            {
+                $contrato->contractacceptedAt       = $celcash->Contract->acceptedAt;
+            }
+            if (isset($celcash->Contract->pdf))
+            {
+                $contrato->contractpdf              = Cas::nulltoSpace($celcash->Contract->pdf);
+            } else {
+                $contrato->contractpdf              = "";
+            }
+        } else {
+           if ($novo)
+           {
+                $contrato->contractname             = "";
+                $contrato->contractdocument         = "";
+                $contrato->contractip               = "";
+                $contrato->contractpdf              = "";
+           }
+        }
+
+        if (isset($celcash->PaymentMethodCreditCard))
+        {
+            $contrato->paymentMethodCreditCard      = json_encode($celcash->PaymentMethodCreditCard);
+        }
+		
+		if (isset($celcash->PaymentMethodPix))
+        {
+            $contrato->paymentMethodPix      		= json_encode($celcash->PaymentMethodPix);
+        }
+		
+		$contrato->tipocontrato						= $tipocontrato;
+		
+        try {
+			//if (!$novo)
+			//{
+				if ($contrato->save())
+				{
+					Log::info("ccelcash", ['contrato_id' => $contrato->id ]);
+				} else {
+					Log::info("ccelcash", ['celcash' => $celcash ]);
+				}
+			//} else {
+			//	Log::info("ccelcash", ['celcash' => $celcash ]);
+			//}
+        } catch (QueryException $e) {
+           Log::info("ccelcash", ['error' => $e ]);
+           Log::info("ccelcash", ['transaction' => $celcash ]);
+           Log::info("ccelcash", ['contrato' => $contrato ]);
+           $retorno->ok 		        = false;
+           return $retorno;
+        }	
+
+        $retorno->ok 		            		= true;
+        $retorno->contrato_id           		= $contrato->id;
+        $retorno->parcelas              		= array();
+
+        if (isset($celcash->Transactions))
+        {
+            if (is_array($celcash->Transactions))
+            {
+                foreach ($celcash->Transactions as $transaction)
+                {
+					//$transaction->event 		= $celcash->event;
+                    $retorno->parcelas[]		= CelCash::CelCashMigrarTransaction($transaction,$galaxId,$tipocontrato);
+                }
+            } else {
+				$transaction					= $celcash->Transactions;
+				//$transaction->event 			= $celcash->event;
+                $retorno->parcelas[]    		= CelCash::CelCashMigrarTransaction($transaction,$galaxId,$tipocontrato);
+            }
+        }
+
+        return $retorno;
+
+    }
+
+    public static function CelCashMigrarTransaction($celcash,$galaxId=1,$tipocontrato='C')
+    {
+       //Log::info("CelCashMigrarTransaction", ['celcash' => $celcash ]);
+	   
+        $retorno 				                    = new stdClass();
+        $retorno->ok 		                        = true;
+        $retorno->galaxPayId                        = $celcash->galaxPayId;
+		
+		if (isset($celcash->subscriptionGalaxPayId))
+		{
+			$galaxPayId								= $celcash->subscriptionGalaxPayId;
+			$tipocontrato							= 'C';
+		} else {
+			if (isset($celcash->chargeGalaxPayId))
+			{
+				$galaxPayId							= $celcash->chargeGalaxPayId;
+				$tipocontrato						= 'V';
+			} else {
+				$galaxPayId							= $celcash->galaxPayId;
+				$tipocontrato						= 'C';
+			}
+		}
+
+        $contrato                                   = \App\Models\Contrato::where('galaxPayId','=',$galaxPayId)
+		                                                                  ->where('tipocontrato','=',$tipocontrato)
+                                                                          ->first();
+
+        if (!isset($contrato->id))
+        {
+			Log::info("ncontrato", ['celcash' => $celcash ]);
+            $retorno->ok 		                    = false;
+            return $retorno;
+        }
+
+        $parcela                                   = \App\Models\Parcela::where('contrato_id','=',$contrato->id)
+																		->where('galaxPayId','=',intval($celcash->galaxPayId))
+                                                                        ->first();
+
+        $novo                                       = false;
+        
+        if (!isset($parcela->id))
+        {
+			 $parcela                               = \App\Models\Parcela::where('contrato_id','=',$contrato->id)
+																		 ->where('nparcela','=',intval($celcash->installment))
+																		 ->first();
+		}
+
+		if (!isset($parcela->id))
+        {
+            $parcela            		            = new \App\Models\Parcela();
+			$parcela->desconto						= 0;
+			$parcela->juros							= 0;
+            $novo                                   = true;
+        }
+
+        $parcela->contrato_id			            = $contrato->id;
+        
+        $parcela->data_vencimento		            = $celcash->payday;
+
+        if (isset($celcash->paydayDate))
+        {
+            if (Cas::temData($celcash->paydayDate))
+            {
+                $parcela->data_pagamento		    = substr($celcash->paydayDate,0,10);
+            }
+        }
+        
+        $value                                      = ($celcash->value / 100);
+        if (isset($celcash->fee))
+        {
+            $parcela->taxa					        = ($celcash->fee / 100);
+        }
+		if ($novo)
+		{
+			$parcela->valor					        = $contrato->valor;
+		}
+		if ($celcash->installment !=1)
+		{
+			if ($contrato->valor > $value) 
+			{
+				$parcela->desconto				    = $contrato->valor - $value;
+			}
+			if ($contrato->valor < $value) 
+			{
+				$parcela->juros					    = $value - $contrato->valor;
+			}
+		}
+        $parcela->valor_pago			            = $value;
+		
+        if ($novo)
+        {
+            $parcela->nparcela				        = $celcash->installment;
+        }
+        $parcela->galaxPayId			            = $celcash->galaxPayId;
+        $parcela->status				            = Cas::nulltoSpace($celcash->status);
+        $parcela->statusDescription		            = Cas::nulltoSpace($celcash->statusDescription);
+        if ((isset($celcash->statusDate)) and (Cas::temData($celcash->statusDate)))
+        {
+            $parcela->statusDate			        = $celcash->statusDate;
+        } 
+        if ($parcela->status !="")
+        {
+            if (($parcela->status == 'cancel') and (Cas::temData($celcash->statusDate)))
+            {
+                $parcela->data_baixa			    =  substr($celcash->statusDate,0,10);
+            }
+            $situacao                               = \App\Models\Situacao::where('status','=',$parcela->status)->first();
+            if (!isset($situacao->id))
+            {
+                $situacao            		        = new \App\Models\Situacao();
+                $situacao->status                   = $parcela->status;
+                $situacao->nome                     = $parcela->statusDescription;
+                $situacao->ativo                    = true;
+                $situacao->save();
+            } else {
+                if (($situacao->nome != $parcela->statusDescription) and ($parcela->statusDescription !=""))
+                {
+                    $situacao->nome                = $parcela->statusDescription;
+                    $situacao->save();
+                }
+            }
+        } 
+        $parcela->additionalInfo		            = Cas::nulltoSpace($celcash->additionalInfo);
+		if (isset($celcash->subscriptionMyId))
+		{
+			$parcela->subscriptionMyId		        = Cas::nulltoSpace($celcash->subscriptionMyId);
+		} else {
+			$parcela->subscriptionMyId		        = "";
+		}
+		if (isset($celcash->payedOutsideGalaxPay))
+		{
+			$parcela->payedOutsideGalaxPay	        = $celcash->payedOutsideGalaxPay;
+		} else {
+			$parcela->payedOutsideGalaxPay	        = false;
+		}
+
+        if ((isset($celcash->datetimeLastSentToOperator)) and (Cas::temData($celcash->datetimeLastSentToOperator)))
+        {
+            $parcela->datetimeLastSentToOperator    = $celcash->datetimeLastSentToOperator;
+        }
+       
+        if (isset($celcash->tid))
+        {
+            $parcela->tid                           = $celcash->tid;
+        }
+
+        if (isset($celcash->authorizationCode))
+        {
+            $parcela->authorizationCode             = $celcash->authorizationCode;
+        }
+
+        if (isset($celcash->cardOperatorId))
+        {
+            $parcela->cardOperatorId                = $celcash->cardOperatorId;
+        }
+
+        if ((isset($celcash->ConciliationOccurrences)) and (is_array($celcash->ConciliationOccurrences)))
+        {
+            $parcela->conciliationOccurrences        = json_encode($celcash->ConciliationOccurrences);
+        }
+
+        if (isset($celcash->CreditCard))
+        {
+            $parcela->creditCard                    = json_encode($celcash->CreditCard);
+        }
+
+		if (isset($celcash->reasonDenied))
+        {
+            $parcela->reasonDenied                  = $celcash->reasonDenied;
+        }
+		
+        if (isset($celcash->Boleto))
+        {
+            if (isset($celcash->Boleto->pdf))
+            {
+                $parcela->boletopdf				    = Cas::nulltoSpace($celcash->Boleto->pdf);
+            } else {
+                $parcela->boletopdf				    = "";
+            }
+            if (isset($celcash->Boleto->bankLine))
+            {
+                $parcela->boletobankLine		    = Cas::nulltoSpace($celcash->Boleto->bankLine);
+            } else {
+                $parcela->boletobankLine		    = "";
+            }
+            if (isset($celcash->Boleto->bankNumber))
+            {
+                $parcela->boletobankNumber		    = Cas::nulltoSpace($celcash->Boleto->bankNumber);
+            } else {
+                $parcela->boletobankNumber          = 0;
+            }
+            if (isset($celcash->Boleto->barCode))
+            {
+                $parcela->boletobarCode			    = Cas::nulltoSpace($celcash->Boleto->barCode);
+            } else {
+                $parcela->boletobarCode			    = "";
+            }
+            if (isset($celcash->Boleto->bankEmissor))
+            {
+                $parcela->boletobankEmissor		    = Cas::nulltoSpace($celcash->Boleto->bankEmissor);
+            } else {
+                $parcela->boletobankEmissor         = "";
+            }
+            if (isset($celcash->Boleto->bankAgency))
+            {
+                $parcela->boletobankAgency		    = Cas::nulltoSpace($celcash->Boleto->bankAgency);
+            } else {
+                $parcela->boletobankAgency          = "";
+            }
+            if (isset($celcash->Boleto->bankAccount))
+            {
+                $parcela->boletobankAccount		    = Cas::nulltoSpace($celcash->Boleto->bankAccount);
+            } else {
+                $parcela->boletobankAccount         = "";
+            }
+        } else {
+            if ($novo)
+            {
+                $parcela->boletopdf				    = "";
+                $parcela->boletobankLine		    = "";
+                $parcela->boletobankNumber		    = 0;
+                $parcela->boletobarCode			    = "";
+                $parcela->boletobankEmissor		    = "";
+                $parcela->boletobankAgency		    = "";
+                $parcela->boletobankAccount		    = "";
+            }
+        }
+        if (isset($celcash->Pix))
+        {
+            if (isset($celcash->Pix->reference))
+            {
+                $parcela->pixreference			     = Cas::nulltoSpace($celcash->Pix->reference);
+            } else {
+                $parcela->pixreference			     = "";
+            }
+            if (isset($celcash->Pix->qrCode))
+            {
+                $parcela->pixqrCode				     = Cas::nulltoSpace($celcash->Pix->qrCode);
+            } else {
+                $parcela->pixqrCode				     = "";
+            }
+            if (isset($celcash->Pix->image))
+            {
+                $parcela->piximage				     = $celcash->Pix->image;
+            } else {
+                $parcela->piximage				     = "";
+            }
+            if (isset($celcash->Pix->page))
+            {
+                $parcela->pixpage				     = $celcash->Pix->page;
+            } else {
+                $parcela->pixpage				     = "";
+            }
+        } else {
+            if ($novo)
+            {
+                $parcela->pixreference			     = "";
+                $parcela->pixqrCode				     = "";
+                $parcela->piximage				     = "";
+                $parcela->pixpage				     = "";
+            }
+        }
+
+        try {
+			//if (!$novo)
+			//{
+				if ($parcela->save())
+				{
+					Log::info("ccelcash", ['parcela_id' => $parcela->id ]);
+				} else {
+					Log::info("ccelcash", ['parcela' => $celcash ]);
+				}
+			//} else {
+			//	Log::info("ccelcash", ['parcela' => $celcash ]);
+			//}
+        } catch (QueryException $e) {
+           Log::info("ccelcash", ['error' => $e ]);
+           Log::info("ccelcash", ['transaction' => $celcash ]);
+           Log::info("ccelcash", ['parcela' => $parcela ]);
+           $retorno->ok 		        = false;
+           return $retorno;
+        }	
+
+        $retorno->ok 		                = true;
+        $retorno->parcela_id                = $parcela->id;
+        $retorno->contrato_id               = $parcela->contrato_id;
+        return $retorno;
+    }
+
+    public static function celcashWebhook($celcash)
+    {
+		
+	   if ((isset($celcash->origem)) and ($celcash->origem == 'CON'))
+	   {
+		    return $celcash;
+	   }
+       /*
+       transaction.updateStatus:	
+       Será enviado quando uma transação tiver seu status de pagamento alterado. 
+       Vai conter todos os dados da entidade Transaction.
+
+       subscription.addTransaction	
+       Será enviado quando uma transação for adicionada em uma assinatura. 
+       Vai conter todos os dados da entidade Transaction.
+
+       company.cashOut	
+       Será enviado quando um pagamento Pix ou um Saque/Transferência for realizado no sistema.
+
+       company.verifyDocuments	
+       Informações de atualização do status de aprovação de conta
+
+       chargeback.update	
+       Será enviado quando uma abertura de disputa for criada no sistema. 
+       Vai conter todos os dados da entidade Chargeback, além de conter alguns dados da entidade Transaction e PaymentBill.
+       */
+
+       //"confirmHash": "bc2abccdfb2fc8824520195266241576",
+       $galaxId                                 = 1;
+    
+       if (isset($celcash->event))
+       {
+            switch ($celcash->event) 
+            {
+                case 'contract.accepted':
+					 if ((isset($celcash->Subscription)) or (isset($celcash->Charge)) or (isset($celcash->Transaction)))
+					 {
+						$retorno 				    = new stdClass();
+                        if (isset($celcash->Subscription))
+                        {
+                            $payload			    = json_decode(json_encode($celcash->Subscription));
+							$payload->event 		= $celcash->event;
+                            $retorno->contrato      = CelCash::CelCashMigrarContrato($payload,$galaxId);
+                        } 
+						return $retorno;
+					 }
+                     break;
+                case 'transaction.status':
+                    return 'transaction.status';
+                case 'transaction.updateStatus': 
+                    if ((isset($celcash->Subscription)) or (isset($celcash->Charge)) or (isset($celcash->Transaction)))
+                    {
+                        $retorno 				    = new stdClass();
+                        if (isset($celcash->Subscription))
+                        {
+                            $payload			    = json_decode(json_encode($celcash->Subscription));
+							$payload->event 		= $celcash->event;
+                            $retorno->contrato      = CelCash::CelCashMigrarContrato($payload,$galaxId);
+							//return $retorno;
+                        }
+						if (isset($celcash->Charge))
+                        {
+                            $payload			    = json_decode(json_encode($celcash->Charge));
+							Log::info("transaction.updateStatus-Charge", ['charge' => $payload ]);
+                            $retorno->contrato      = CelCash::updateParcelaWithChargeTransaction($payload,$celcash);
+							return $retorno;
+                        }
+                        if (isset($celcash->Transaction))
+                        {
+                            $payload			    = json_decode(json_encode($celcash->Transaction));
+							$payload->event 		= $celcash->event;
+                            $retorno->transaction   = CelCash::CelCashMigrarTransaction($payload,$galaxId,'C');
+                        }
+                        return $retorno;
+                    } else {
+                        Log::info("transaction.updateStatus", ['celcash' => $celcash ]);
+                    }
+                case 'subscription.addTransaction':
+					/*
+					 if ((isset($celcash->Subscription)) or (isset($celcash->Charge)) or (isset($celcash->Transaction)))
+					 {
+						$retorno 				    = new stdClass();
+                        if (isset($celcash->Subscription))
+                        {
+                            $payload			    = json_decode(json_encode($celcash->Subscription));
+                            $retorno->contrato      = CelCash::CelCashMigrarContrato($payload,$galaxId);
+                        } 
+						return $retorno;
+					 }
+					 */
+                    return 'subscription.addTransaction';
+            }
+        }
+
+        return $celcash;
+    }
+
+    public static function obterCarne($galaxPayId,$galaxId=1,$tipo='onePDFSubscription')
+    {
+        $token                           = CelCash::Token($galaxId);
+
+       // Log::info("galaxPayId", ['galaxPayId' => $galaxPayId ]);
+        
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/carnes/$tipo/none";
+        $retorno 						= new stdClass();
+		
+		$json 							= '{"galaxPayIds": [' . $galaxPayId . ']}';
+
+		$payload 						= json_decode($json, true); 
+
+		//Log::info("payload", ['payload' => $payload]);
+		//Log::info("endpoint", ['endpoint' => $endpoint]);
+		//Log::info("token", ['token' => $token->token]);
+ 
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint,$payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+		
+		//Log::info("response", ['response' => $response]);
+        return $response;
+    }
+
+    public static function obterBoletos($galaxPayId,$galaxId=1)
+    {
+        $token                           = CelCash::Token($galaxId);
+
+        //Log::info("celcash", ['ctoken' => $token ]);
+        
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/boletos/transactions";
+        $retorno 						= new stdClass();
+
+        $payload                        = [
+                                                "galaxPayIds"   => $galaxPayId,
+                                                "order"         => "transactionPayday.asc"
+                                          ];
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint,$payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $response->statcode             = $statcode;
+        $response->endpoint             = $endpoint;
+        return $response;
+    }
+	
+	public static function storeContrato($id)
+    {
+		$retorno 							= new stdClass();
+        $retorno->ok                    	= "N";
+		
+		$contrato 			            	= \App\Models\Contrato::with('vendedor:id,nome','cliente')->find($id);
+
+        if (!isset($contrato->id)) 
+        {
+			$retorno->mensagem          	= "Contrato ID $id não encontrado";
+			return $retorno;
+		}
+		
+		$plano              				= \App\Models\Plano::with('periodicidade:id,nome,periodicity')
+															 ->select('id','nome','formapagamento','taxa_ativacao','preco','periodicidade_id','galaxPayId')
+															 ->find($contrato->plano_id);
+        
+        if (!isset($plano->id)) 
+        {
+            $retorno->mensagem          	= "Plano do contrado ID $id não encontrado";
+			return $retorno;
+        }
+		
+		$customer                   		= CelCash::getStoreCustomers($contrato->cliente_id);
+		
+		//Log::info("customer", ['customer' => $customer ]);
+		
+		if ($customer->ok == "N")
+        {
+			$retorno->mensagem          	= $customer->mensagem;
+			return $retorno;
+        }
+		
+		if (isset($customer->galaxPayId))
+		{
+			$cliente						= $customer;
+		}
+		
+		if (isset($customer->customers->galaxPayId))
+		{
+			$cliente						= $customer->customers;
+		}
+		
+		if (isset($customer->customers->Customer->galaxPayId))
+		{
+			$cliente						= $customer->customers->Customer;
+		}
+		
+		if (isset($customer->customer->Customer->galaxPayId))
+		{
+			$cliente						= $customer->customer->Customer;
+		}
+		
+		if (!isset($cliente->galaxPayId))
+		{
+			$retorno->mensagem          	= 'Não conseguiu mapear o cliente. Problema no Cel Cash';
+			return $retorno;
+		}
+		
+		/* aqui */
+		if (isset($cliente->Address->number))
+		{
+			if (Cas::nulltoSpace($cliente->Address->number) =="")
+			{
+				$cliente->Address->number  = $contrato->cliente->numero;
+			}
+		}
+		
+		$dados = array(
+				'myId'                  	=> $id,
+				'planMyId'					=> $plano->id,
+				'planGalaxPayId'			=> $plano->galaxPayId,
+				'payday'                	=> $contrato->firstPayDayDate,
+				'value'                 	=> intval($contrato->valor * 100),
+				'additionalInfo'			=> "",
+				"payedOutsideGalaxPay"  	=> false,
+				"mainPaymentMethodId"   	=> $plano->formapagamento,
+				"Customer"              	=> [
+					"myId"              	=> $cliente->myId,
+					"galaxPayId"        	=> $cliente->galaxPayId,
+					"name"              	=> $cliente->name,
+					"document"          	=> $cliente->document,
+					"emails"            	=> $cliente->emails,
+					"phones"            	=> $cliente->phones,
+					"Address"           	=> $cliente->Address
+				],
+        );
+		
+		switch($plano->formapagamento) {
+            case 'creditcard':
+			case 'cartao':
+                $dados['PaymentMethodCreditCard'] = [
+                    'Card' => [],
+                ];
+                break;
+            case 'boleto':
+                $dados['PaymentMethodBoleto'] = [
+                    'instructions' => "Boleto de pagamento",
+                ];
+                break;
+            case 'pix':
+                $dados['PaymentMethodPix'] = [
+                    'instructions' => "Pagamento via pix",
+                ];
+                break;
+            default:
+			   $retorno->mensagem          	= "Contrato ID $id forma de pagamento inválida";
+			   return $retorno;
+        }
+		
+		$dados['ExtraFields'] 				= [
+												[
+													'tagName'  => 'CP_VENDEDOR',
+													'tagValue' => $contrato->vendedor->nome
+												]
+											  ];
+	
+
+		//Log::info("subscription", ['dados' => $dados ]);
+				
+		$subscription                        = CelCash::storeSubscriptions($dados);
+		
+		if ($subscription->ok != 'S')
+		{
+			$retorno->mensagem				= $subscription->mensagem;
+			return $retorno;
+		}
+		
+		$retorno							= $subscription->response;
+		$retorno->ok 						= 'S';
+		return $retorno;
+		
+	}
+	
+	public static function storeSubscriptions($payload)
+    {
+        $retorno 						 = new stdClass();
+        $retorno->ok                     = "N";
+
+        $token                           = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/subscriptions";
+
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+        $retorno->mensagem              = CelCash::buscarMensagem($statcode, $response);
+
+		if ($statcode == 200) 
+        {
+            $retorno->ok                = "S";
+        }
+		
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+
+	public static function updateContratoWithCharge($celcash)
+	{
+		//Log::info("updateContratoWithCharge", ['charge' => $celcash ]);
+		
+		$retorno 						 			= new stdClass();
+        $retorno->ok                     			= "N";
+		
+		if (!isset($celcash->myId))
+		{
+			 $retorno->mensagem          			= "Dados da cobrança não encontrada";
+			 return $retorno;
+		}
+		
+		if (substr_count($celcash->myId, '#') <> 2) 
+		{
+			 $retorno->mensagem          			= "Dados da cobrança não encontrado";
+			 return $retorno;
+		}
+		
+		list($contrato_id,$parcela_id,$hash)        = explode("#",$celcash->myId);
+		
+		$contrato 				                    = \App\Models\Contrato::find($contrato_id);
+                                                                  
+		if (!isset($contrato->id))
+		{
+			 $retorno->mensagem          			= "Dados do contrato não encontrado";
+			 return $retorno;
+		}
+						
+		$contrato->galaxPayId			            = $celcash->galaxPayId;
+        $contrato->paymentLink			            = $celcash->paymentLink;
+        $contrato->mainPaymentMethodId              = Cas::nulltoSpace($celcash->mainPaymentMethodId);
+		if (isset($celcash->quantity))
+		{
+			$contrato->quantity			            = $celcash->quantity;
+		} else {
+			$contrato->quantity			            = 1;
+		}
+		if (isset($celcash->periodicity))
+		{
+			$contrato->periodicity			        = $celcash->periodicity;
+		} else {
+			$contrato->periodicity					= 1;
+		}
+		if (isset($celcash->firstPayDayDate))
+		{
+			$contrato->firstPayDayDate		        = $celcash->firstPayDayDate;
+		}
+		if (isset($celcash->additionalInfo))
+		{
+			$contrato->additionalInfo		        = Cas::nulltoSpace($celcash->additionalInfo);
+		} else {
+			$contrato->additionalInfo		        = "";
+		}
+		
+        if (isset($celcash->PaymentMethodBoleto))
+        {
+            if (isset($celcash->PaymentMethodBoleto->fine))
+            {
+                $contrato->paymentMethodBoletofine          = $celcash->PaymentMethodBoleto->fine;
+            } else {
+                $contrato->paymentMethodBoletofine          = 0;
+            }
+
+            if (isset($celcash->PaymentMethodBoleto->interest))
+            {
+                $contrato->paymentMethodBoletointerest      = $celcash->PaymentMethodBoleto->interest;
+            } else {
+                $contrato->paymentMethodBoletointerest      = 0;
+            }
+            if (isset($celcash->PaymentMethodBoleto->instructions))
+            {
+                $contrato->paymentMethodBoletoinstructions  = Cas::nulltoSpace($celcash->PaymentMethodBoleto->instructions);
+            } else {
+                $contrato->paymentMethodBoletoinstructions  = "";
+            }
+            if (isset($celcash->PaymentMethodBoleto->deadlineDays))
+            {
+                $contrato->paymentMethodBoletodeadlineDays  = $celcash->PaymentMethodBoleto->deadlineDays;
+            } else {
+                $contrato->paymentMethodBoletodeadlineDays  = 0;
+            }
+            if (isset($celcash->PaymentMethodBoleto->documentNumber))
+            {
+                $contrato->paymentMethodBoletodocumentNumber = Cas::nulltoSpace($celcash->PaymentMethodBoleto->documentNumber);
+            } else {
+                 $contrato->paymentMethodBoletodocumentNumber= "";
+            }
+        } 
+
+        if (isset($celcash->Contract))
+        {
+            if (isset($celcash->Contract->name))
+            {
+                $contrato->contractname            = Cas::nulltoSpace($celcash->Contract->name);
+            } else {
+                $contrato->contractname            = "";
+            }
+            if (isset($celcash->Contract->document))
+            {
+                $contrato->contractdocument        = Cas::nulltoSpace($celcash->Contract->document);
+            } else {
+                $contrato->contractdocument        = "";
+            }
+            if (isset($celcash->Contract->ip))
+            {
+                $contrato->contractip              = Cas::nulltoSpace($celcash->Contract->ip);
+            } else {
+                $contrato->contractip              = "";
+            }
+            if (isset($celcash->Contract->acceptedAt))
+            {
+                $contrato->contractacceptedAt       = $celcash->Contract->acceptedAt;
+            }
+            if (isset($celcash->Contract->pdf))
+            {
+                $contrato->contractpdf              = Cas::nulltoSpace($celcash->Contract->pdf);
+            } else {
+                $contrato->contractpdf              = "";
+            }
+        }
+
+        if (isset($celcash->PaymentMethodCreditCard))
+        {
+            $contrato->paymentMethodCreditCard      = json_encode($celcash->PaymentMethodCreditCard);
+        }
+		
+		if (isset($celcash->PaymentMethodPix))
+        {
+            $contrato->paymentMethodPix      		= json_encode($celcash->PaymentMethodPix);
+        }
+		
+		if ($contrato->save())
+		{
+			if (isset($celcash->Transactions[0]))
+			{
+				$retorno 							= CelCash::updateParcelaWithChargeTransaction($celcash->Transactions[0], $celcash);
+				return $retorno;
+			} else {
+				$retorno->mensagem          		= "Dados da transaçao não encontrada";
+			}
+		}
+		
+		return $retorno;
+	}
+
+	public static function updateParcelaWithChargeTransaction($celcash,$response="")
+	{
+		//Log::info("updateParcelaWithChargeTransaction", ['celcash' => $celcash ]);
+		//Log::info("updateParcelaWithChargeTransaction", ['response' => $response ]);
+		
+		$retorno 						 			= new stdClass();
+        $retorno->ok                     			= "N";
+		
+		if ((!isset($celcash->chargeMyId)) and (!isset($celcash->myId)))
+		{
+			 $retorno->mensagem          			= "Dados da cobrança não encontrada";
+			 return $retorno;
+		}
+		
+		if (isset($celcash->myId))
+		{
+			$celcash->chargeMyId					= $celcash->myId;
+		}
+		
+		
+		if (substr_count($celcash->chargeMyId, '#') <> 2) 
+		{
+			 $retorno->mensagem          			= "Dados da cobrança não encontrado";
+			 return $retorno;
+		}
+		/*
+		if (Cas::nulltoSpace($celcash->status) == "canceled")
+		{
+			 $retorno->mensagem          			= "Cancelado pelo Cell Cash. Porém nao pode aqui.";
+			 return $retorno;
+		}
+		*/
+		list($contrato_id,$parcela_id,$hash)        = explode("#",$celcash->chargeMyId);
+		
+		$parcela 				                    = \App\Models\Parcela::find($parcela_id);
+                                                                  
+		if (!isset($parcela->id))
+		{
+			 $retorno->mensagem          			= "Dados da parcela não encontrado";
+			 return $retorno;
+		}
+
+		if (isset($celcash->payday))
+		{			
+			$parcela->data_vencimento		        = $celcash->payday;
+		}
+		
+		if ((!isset($celcash->paydayDate)) and (isset($response->Transaction->paydayDate)))
+		{
+			$celcash->paydayDate					= $response->Transaction->paydayDate;
+		}
+			 
+        if (isset($celcash->paydayDate))
+        {
+            if (Cas::temData($celcash->paydayDate))
+            {
+                $parcela->data_pagamento		    = substr($celcash->paydayDate,0,10);
+            }
+        }
+        
+        $value                                      = ($celcash->value / 100);
+        if (isset($celcash->fee))
+        {
+            $parcela->taxa					        = ($celcash->fee / 100);
+        }
+		
+        $parcela->valor_pago			            = $value;
+		
+		if ($parcela->galaxPayId == 0)
+		{
+			$parcela->galaxPayId			        = $celcash->galaxPayId;
+		}
+		
+		$parcela->chargeMyId						= $celcash->chargeMyId;
+		if (isset($response->galaxPayId))
+		{
+			$parcela->cgalaxPayId			        = $response->galaxPayId;
+			$parcela->response 						= json_encode($response);
+		}
+        $parcela->status				            = Cas::nulltoSpace($celcash->status);
+		
+		if (isset($celcash->statusDescription))
+		{
+			$parcela->statusDescription		        = Cas::nulltoSpace($celcash->statusDescription);
+		}
+		
+        if ((isset($celcash->statusDate)) and (Cas::temData($celcash->statusDate)))
+        {
+            $parcela->statusDate			        = $celcash->statusDate;
+        } 
+        if ($parcela->status !="")
+        {
+            if (($parcela->status == 'cancel') and (Cas::temData($celcash->statusDate)))
+            {
+                $parcela->data_baixa			    =  substr($celcash->statusDate,0,10);
+            }
+        } 
+		if (isset($celcash->additionalInfo))
+		{
+			$parcela->additionalInfo		        = Cas::nulltoSpace($celcash->additionalInfo);
+		}
+		if (isset($celcash->subscriptionMyId))
+		{
+			$parcela->subscriptionMyId		        = Cas::nulltoSpace($celcash->subscriptionMyId);
+		} else {
+			$parcela->subscriptionMyId		        = "";
+		}
+		if (isset($celcash->payedOutsideGalaxPay))
+		{
+			$parcela->payedOutsideGalaxPay	        = $celcash->payedOutsideGalaxPay;
+		} else {
+			$parcela->payedOutsideGalaxPay	        = false;
+		}
+
+        if ((isset($celcash->datetimeLastSentToOperator)) and (Cas::temData($celcash->datetimeLastSentToOperator)))
+        {
+            $parcela->datetimeLastSentToOperator    = $celcash->datetimeLastSentToOperator;
+        }
+       
+        if (isset($celcash->tid))
+        {
+            $parcela->tid                           = $celcash->tid;
+        }
+
+        if (isset($celcash->authorizationCode))
+        {
+            $parcela->authorizationCode             = $celcash->authorizationCode;
+        }
+
+        if (isset($celcash->cardOperatorId))
+        {
+            $parcela->cardOperatorId                = $celcash->cardOperatorId;
+        }
+
+        if ((isset($celcash->ConciliationOccurrences)) and (is_array($celcash->ConciliationOccurrences)))
+        {
+            $parcela->conciliationOccurrences        = json_encode($celcash->ConciliationOccurrences);
+        }
+
+        if (isset($celcash->CreditCard))
+        {
+            $parcela->creditCard                    = json_encode($celcash->CreditCard);
+        }
+		
+		if (isset($celcash->reasonDenied))
+        {
+            $parcela->reasonDenied                  = $celcash->reasonDenied;
+        }
+
+        if (isset($celcash->Boleto))
+        {
+            if (isset($celcash->Boleto->pdf))
+            {
+                $parcela->boletopdf				    = Cas::nulltoSpace($celcash->Boleto->pdf);
+            } else {
+                $parcela->boletopdf				    = "";
+            }
+            if (isset($celcash->Boleto->bankLine))
+            {
+                $parcela->boletobankLine		    = Cas::nulltoSpace($celcash->Boleto->bankLine);
+            } else {
+                $parcela->boletobankLine		    = "";
+            }
+            if (isset($celcash->Boleto->bankNumber))
+            {
+                $parcela->boletobankNumber		    = Cas::nulltoSpace($celcash->Boleto->bankNumber);
+            } else {
+                $parcela->boletobankNumber          = 0;
+            }
+            if (isset($celcash->Boleto->barCode))
+            {
+                $parcela->boletobarCode			    = Cas::nulltoSpace($celcash->Boleto->barCode);
+            } else {
+                $parcela->boletobarCode			    = "";
+            }
+            if (isset($celcash->Boleto->bankEmissor))
+            {
+                $parcela->boletobankEmissor		    = Cas::nulltoSpace($celcash->Boleto->bankEmissor);
+            } else {
+                $parcela->boletobankEmissor         = "";
+            }
+            if (isset($celcash->Boleto->bankAgency))
+            {
+                $parcela->boletobankAgency		    = Cas::nulltoSpace($celcash->Boleto->bankAgency);
+            } else {
+                $parcela->boletobankAgency          = "";
+            }
+            if (isset($celcash->Boleto->bankAccount))
+            {
+                $parcela->boletobankAccount		    = Cas::nulltoSpace($celcash->Boleto->bankAccount);
+            } else {
+                $parcela->boletobankAccount         = "";
+            }
+        } 
+		
+        if (isset($celcash->Pix))
+        {
+            if (isset($celcash->Pix->reference))
+            {
+                $parcela->pixreference			     = Cas::nulltoSpace($celcash->Pix->reference);
+            } else {
+                $parcela->pixreference			     = "";
+            }
+            if (isset($celcash->Pix->qrCode))
+            {
+                $parcela->pixqrCode				     = Cas::nulltoSpace($celcash->Pix->qrCode);
+            } else {
+                $parcela->pixqrCode				     = "";
+            }
+            if (isset($celcash->Pix->image))
+            {
+                $parcela->piximage				     = $celcash->Pix->image;
+            } else {
+                $parcela->piximage				     = "";
+            }
+            if (isset($celcash->Pix->page))
+            {
+                $parcela->pixpage				     = $celcash->Pix->page;
+            } else {
+                $parcela->pixpage				     = "";
+            }
+        }
+		
+		$parcela->save();
+		$retorno->ok                     			= "S";
+		return $retorno;
+	}
+	
+	public static function updateContratoWithSubscription($celcash)
+    {
+		//Log::info("updateContratoWithSubscription", ['celcash' => $celcash ]);
+	
+		$retorno 						 			= new stdClass();
+        $retorno->ok                     			= "N";
+		$retorno->status 							= "";
+		
+		if (!isset($celcash->Subscription))
+		{
+			 $retorno->mensagem          			= "Dados da inscrição não encontada";
+			 return $retorno;
+		}
+		
+		if (!isset($celcash->Subscription->galaxPayId))
+		{
+			$retorno->mensagem          			= "Número do contrato não encontrado";
+			return $retorno;
+		}
+		
+		$contrato 			            			= \App\Models\Contrato::find($celcash->Subscription->myId);
+
+        if (!isset($contrato->id)) 
+        {
+			$retorno->mensagem          			= "Contrato enviado pelo CelCash não encontrado ID: " . $celcash->Subscription->myId;
+			return $retorno;
+		}
+		
+		$contrato->galaxPayId			            = $celcash->Subscription->galaxPayId;
+        $contrato->paymentLink			            = $celcash->Subscription->paymentLink;
+        $contrato->mainPaymentMethodId              = Cas::nulltoSpace($celcash->Subscription->mainPaymentMethodId);
+        $contrato->status				            = $celcash->Subscription->status;
+		$retorno->status							= $celcash->Subscription->status;
+		
+		if (isset($celcash->Subscription->quantity))
+		{
+			$contrato->quantity			            = $celcash->Subscription->quantity;
+		} 
+		if (isset($celcash->Subscription->periodicity))
+		{
+			$contrato->periodicity			        = $celcash->Subscription->periodicity;
+		} 
+		if (isset($celcash->Subscription->firstPayDayDate))
+		{
+			$contrato->firstPayDayDate		        = $celcash->Subscription->firstPayDayDate;
+		}
+		if (isset($celcash->Subscription->additionalInfo))
+		{
+			$contrato->additionalInfo		        = Cas::nulltoSpace($celcash->Subscription->additionalInfo);
+		} 
+		
+        $contrato->situacao_id			            = 1;
+
+        if (isset($celcash->Subscription->PaymentMethodBoleto))
+        {
+            if (isset($celcash->Subscription->PaymentMethodBoleto->fine))
+            {
+                $contrato->paymentMethodBoletofine          = $celcash->Subscription->PaymentMethodBoleto->fine;
+            } 
+
+            if (isset($celcash->Subscription->PaymentMethodBoleto->interest))
+            {
+                $contrato->paymentMethodBoletointerest      = $celcash->Subscription->PaymentMethodBoleto->interest;
+            } 
+            if (isset($celcash->Subscription->PaymentMethodBoleto->instructions))
+            {
+                $contrato->paymentMethodBoletoinstructions  = Cas::nulltoSpace($celcash->Subscription->PaymentMethodBoleto->instructions);
+            } 
+            if (isset($celcash->Subscription->PaymentMethodBoleto->deadlineDays))
+            {
+                $contrato->paymentMethodBoletodeadlineDays  = $celcash->Subscription->PaymentMethodBoleto->deadlineDays;
+            } 
+            if (isset($celcash->Subscription->PaymentMethodBoleto->documentNumber))
+            {
+                $contrato->paymentMethodBoletodocumentNumber = Cas::nulltoSpace($celcash->Subscription->PaymentMethodBoleto->documentNumber);
+            } 
+        } else {
+            $contrato->paymentMethodBoletofine           	= 0;
+            $contrato->paymentMethodBoletointerest       	= 0;
+            $contrato->paymentMethodBoletoinstructions   	= "";
+            $contrato->paymentMethodBoletodeadlineDays   	= 0;
+            $contrato->paymentMethodBoletodocumentNumber 	= "";
+        }
+
+        if (isset($celcash->Subscription->Contract))
+        {
+            if (isset($celcash->Subscription->Contract->name))
+            {
+                $contrato->contractname            = Cas::nulltoSpace($celcash->Subscription->Contract->name);
+            } 
+            if (isset($celcash->Subscription->Contract->document))
+            {
+                $contrato->contractdocument        = Cas::nulltoSpace($celcash->Subscription->Contract->document);
+            } 
+            if (isset($celcash->Subscription->Contract->ip))
+            {
+                $contrato->contractip              = Cas::nulltoSpace($celcash->Subscription->Contract->ip);
+            } 
+            if (isset($celcash->Subscription->Contract->acceptedAt))
+            {
+                $contrato->contractacceptedAt       = $celcash->Subscription->Contract->acceptedAt;
+            }
+            if (isset($celcash->Subscription->Contract->pdf))
+            {
+                $contrato->contractpdf              = Cas::nulltoSpace($celcash->Subscription->Contract->pdf);
+            } 
+        } else {
+            $contrato->contractname             	= "";
+            $contrato->contractdocument         	= "";
+            $contrato->contractip               	= "";
+            $contrato->contractpdf              	= "";
+        }
+
+        if (isset($celcash->Subscription->PaymentMethodCreditCard))
+        {
+            $contrato->paymentMethodCreditCard      = json_encode($celcash->Subscription->PaymentMethodCreditCard);
+        }
+		
+		if (isset($celcash->Subscription->PaymentMethodPix))
+        {
+            $contrato->paymentMethodPix      		= json_encode($celcash->Subscription->PaymentMethodPix);
+        }
+		
+		if (!$contrato->save())
+		{
+			$retorno->mensagem          						= "Ocorreu problema na tentativa de atualizar o contrato número: " . $celcash->Subscription->galaxPayId;
+			return $retorno;
+		}
+		
+		if (isset($celcash->Subscription->Transactions))
+        {
+			$transactions 										= array();
+			
+            if (is_array($celcash->Subscription->Transactions))
+            {
+				$transactions									 = $celcash->Subscription->Transactions;
+			} else {
+				$transactions[]									 = $celcash->Subscription->Transactions;
+			}
+			
+            foreach ($transactions as $transaction)
+            {
+					$parcela                       				= \App\Models\Parcela::where('contrato_id','=',$contrato->id)
+																					 ->where('nparcela','=',$transaction->installment)
+																					 ->first();
+					if (!isset($parcela->id))
+					{
+						$retorno->mensagem        				= "Parcela número " . $transaction->installment . ' não encontrada';
+						return $retorno;
+					}
+	
+					if (isset($transaction->fee))
+					{
+						$parcela->taxa					        = ($transaction->fee / 100);
+					}
+					
+					$parcela->galaxPayId			            = $transaction->galaxPayId;
+					$parcela->status				            = Cas::nulltoSpace($transaction->status);
+					$parcela->statusDescription		            = Cas::nulltoSpace($transaction->statusDescription);
+					if ((isset($transaction->statusDate)) and (Cas::temData($transaction->statusDate)))
+					{
+						$parcela->statusDate			        = $transaction->statusDate;
+					} 
+					$parcela->additionalInfo		            = Cas::nulltoSpace($transaction->additionalInfo);
+					if (isset($transaction->subscriptionMyId))
+					{
+						$parcela->subscriptionMyId		        = Cas::nulltoSpace($transaction->subscriptionMyId);
+					} 
+					if (isset($transaction->payedOutsideGalaxPay))
+					{
+						$parcela->payedOutsideGalaxPay	        = $transaction->payedOutsideGalaxPay;
+					} 
+
+					if ((isset($transaction->datetimeLastSentToOperator)) and (Cas::temData($transaction->datetimeLastSentToOperator)))
+					{
+						$parcela->datetimeLastSentToOperator    = $transaction->datetimeLastSentToOperator;
+					}
+				   
+					if (isset($transaction->tid))
+					{
+						$parcela->tid                           = $transaction->tid;
+					}
+
+					if (isset($transaction->authorizationCode))
+					{
+						$parcela->authorizationCode             = $transaction->authorizationCode;
+					}
+
+					if (isset($transaction->cardOperatorId))
+					{
+						$parcela->cardOperatorId                = $transaction->cardOperatorId;
+					}
+
+					if ((isset($transaction->ConciliationOccurrences)) and (is_array($transaction->ConciliationOccurrences)))
+					{
+						$parcela->conciliationOccurrences        = json_encode($transaction->ConciliationOccurrences);
+					}
+
+					if (isset($transaction->CreditCard))
+					{
+						$parcela->creditCard                    = json_encode($transaction->CreditCard);
+					}
+
+					if (isset($transaction->Boleto))
+					{
+						if (isset($transaction->Boleto->pdf))
+						{
+							$parcela->boletopdf				    = Cas::nulltoSpace($transaction->Boleto->pdf);
+						} 
+						if (isset($transaction->Boleto->bankLine))
+						{
+							$parcela->boletobankLine		    = Cas::nulltoSpace($transaction->Boleto->bankLine);
+						} 
+						if (isset($transaction->Boleto->bankNumber))
+						{
+							$parcela->boletobankNumber		    = Cas::nulltoSpace($transaction->Boleto->bankNumber);
+						} 
+						if (isset($transaction->Boleto->barCode))
+						{
+							$parcela->boletobarCode			    = Cas::nulltoSpace($transaction->Boleto->barCode);
+						} 
+						if (isset($transaction->Boleto->bankEmissor))
+						{
+							$parcela->boletobankEmissor		    = Cas::nulltoSpace($transaction->Boleto->bankEmissor);
+						} 
+						if (isset($transaction->Boleto->bankAgency))
+						{
+							$parcela->boletobankAgency		    = Cas::nulltoSpace($transaction->Boleto->bankAgency);
+						} 
+						if (isset($transaction->Boleto->bankAccount))
+						{
+							$parcela->boletobankAccount		    = Cas::nulltoSpace($transaction->Boleto->bankAccount);
+						} 
+					} else {
+						$parcela->boletopdf				    = "";
+						$parcela->boletobankLine		    = "";
+						$parcela->boletobankNumber		    = 0;
+						$parcela->boletobarCode			    = "";
+						$parcela->boletobankEmissor		    = "";
+						$parcela->boletobankAgency		    = "";
+						$parcela->boletobankAccount		    = "";
+					}
+					if (isset($transaction->Pix))
+					{
+						if (isset($transaction->Pix->reference))
+						{
+							$parcela->pixreference			= Cas::nulltoSpace($transaction->Pix->reference);
+						} 
+						if (isset($transaction->Pix->qrCode))
+						{
+							$parcela->pixqrCode				= Cas::nulltoSpace($transaction->Pix->qrCode);
+						} 
+						if (isset($transaction->Pix->image))
+						{
+							$parcela->piximage				= $transaction->Pix->image;
+						} 
+						if (isset($transaction->Pix->page))
+						{
+							$parcela->pixpage				= $transaction->Pix->page;
+						} 
+					} else {
+						$parcela->pixreference			   	= "";
+						$parcela->pixqrCode				    = "";
+						$parcela->piximage				    = "";
+						$parcela->pixpage				    = "";
+					}
+
+					if (!$parcela->save())
+					{
+						$retorno->mensagem          		= "Ocorreu problema na tentativa de atualizar a parcela número: " . $transaction->galaxPayId;
+						return $retorno;
+					}
+            }
+        } 
+        
+		$retorno->ok                     					= "S";
+		return $retorno;
+	}
+	
+	public static function storeContratoCharges($parcela_id)
+    {
+		$retorno 							= new stdClass();
+        $retorno->ok                    	= "N";
+		$retorno->mensagem 					= "";
+		
+		$parcela 							= \App\Models\Parcela::find($parcela_id);
+		
+		if (!isset($parcela->id)) 
+        {
+            $retorno->mensagem          	= "Parcela $parcela_id não encontrado";
+			return $retorno;
+        }
+		
+		if ($parcela->galaxPayId > 0)
+        {
+			$retorno->mensagem          	= "Já existe a cobrança no Cell Cash";
+			return $retorno;
+		}
+		
+		$contrato 			            	= \App\Models\Contrato::with('vendedor:id,nome')->find($parcela->contrato_id);
+
+        if (!isset($contrato->id)) 
+        {
+			$retorno->mensagem          	= "Contrato ID " . $parcela->contrato_id. " não encontrado";
+			return $retorno;
+		}
+		
+		$contrato_id						= $contrato->id;
+		
+		$plano              				= \App\Models\Plano::with('periodicidade:id,nome,periodicity')
+												->select('id','nome','formapagamento','taxa_ativacao','preco','periodicidade_id')
+												->find($contrato->plano_id);
+        
+        if (!isset($plano->id)) 
+        {
+            $retorno->mensagem          	= "Plano do contrado ID $contrato_id não encontrado";
+			return $retorno;
+        }
+		
+		$customer                   		= CelCash::getStoreCustomers($contrato->cliente_id);
+		
+		//Log::info("customer", ['customer' => $customer ]);
+		
+		if ($customer->ok == "N")
+        {
+			$retorno->mensagem          	= $customer->mensagem;
+			return $retorno;
+        }
+		
+		if (isset($customer->galaxPayId))
+		{
+			$cliente						= $customer;
+		}
+		
+		if (isset($customer->customers->galaxPayId))
+		{
+			$cliente						= $customer->customers;
+		}
+		
+		if (isset($customer->customers->Customer->galaxPayId))
+		{
+			$cliente						= $customer->customers->Customer;
+		}
+		
+		if (!isset($cliente->galaxPayId))
+		{
+			$retorno->mensagem          	= 'Não conseguiu mapear o cliente. Problema no Cel Cash';
+			return $retorno;
+		}
+		
+		// Verificar se já existe transação para o mesmo cliente na mesma data de vencimento
+		
+		 
+		$verificacao = CelCash::verificarTransacaoExistente(
+			$cliente->document,
+			$cliente->galaxPayId,
+			$parcela->data_vencimento,
+			$parcela->valor
+		);
+		
+		if ($verificacao->existe)
+		{
+			//$retorno->mensagem          					= 'Já existe a transaçao no CellCash';
+			//return $retorno;
+			
+			if (isset($verificacao->transacao->Charge))
+			{
+				// Log::info("Charge", ['Charge' => $verificacao->transacao->Charge ]);
+				
+				$parcela->galaxPayId			            = $verificacao->transacao->galaxPayId;
+				$parcela->cgalaxPayId			            = $verificacao->transacao->Charge->galaxPayId;
+				$parcela->chargeMyId						= $verificacao->transacao->Charge->myId;
+		
+				if (isset($verificacao->transacao->Boleto))
+				{
+					if (isset($verificacao->transacao->Boleto->pdf))
+					{
+						$parcela->boletopdf				    = Cas::nulltoSpace($verificacao->transacao->Boleto->pdf);
+					} else {
+						$parcela->boletopdf				    = "";
+					}
+					if (isset($verificacao->transacao->Boleto->bankLine))
+					{
+						$parcela->boletobankLine		    = Cas::nulltoSpace($verificacao->transacao->Boleto->bankLine);
+					} else {
+						$parcela->boletobankLine		    = "";
+					}
+					if (isset($verificacao->transacao->Boleto->bankNumber))
+					{
+						$parcela->boletobankNumber		    = Cas::nulltoSpace($verificacao->transacao->Boleto->bankNumber);
+					} else {
+						$parcela->boletobankNumber          = 0;
+					}
+					if (isset($verificacao->transacao->Boleto->barCode))
+					{
+						$parcela->boletobarCode			    = Cas::nulltoSpace($verificacao->transacao->Boleto->barCode);
+					} else {
+						$parcela->boletobarCode			    = "";
+					}
+					if (isset($verificacao->transacao->Boleto->bankEmissor))
+					{
+						$parcela->boletobankEmissor		    = Cas::nulltoSpace($verificacao->transacao->Boleto->bankEmissor);
+					} else {
+						$parcela->boletobankEmissor         = "";
+					}
+					if (isset($verificacao->transacao->Boleto->bankAgency))
+					{
+						$parcela->boletobankAgency		    = Cas::nulltoSpace($verificacao->transacao->Boleto->bankAgency);
+					} else {
+						$parcela->boletobankAgency          = "";
+					}
+					if (isset($verificacao->transacao->Boleto->bankAccount))
+					{
+						$parcela->boletobankAccount		    = Cas::nulltoSpace($verificacao->transacao->Boleto->bankAccount);
+					} else {
+						$parcela->boletobankAccount         = "";
+					}
+				} 
+				$parcela->save();
+				$retorno 						= new stdClass();
+				$retorno->Charge				= $verificacao->transacao->Charge;
+				$retorno->ok 					= 'S';
+			}
+			return $retorno;
+		}
+		 
+		$dados = array(
+				'myId'                  	=> $contrato_id . '#' . $parcela_id . "#" . bin2hex(random_bytes(5)),
+				'payday'                	=> $parcela->data_vencimento,
+				'value'                 	=> intval($parcela->valor * 100),
+				'additionalInfo'			=> "",
+				"payedOutsideGalaxPay"  	=> false,
+				"mainPaymentMethodId"   	=> $plano->formapagamento,
+				"Customer"              	=> [
+					"myId"              	=> $cliente->myId,
+					"galaxPayId"        	=> $cliente->galaxPayId,
+					"name"              	=> $cliente->name,
+					"document"          	=> $cliente->document,
+					"emails"            	=> $cliente->emails,
+					"phones"            	=> $cliente->phones,
+					"Address"           	=> $cliente->Address
+				],
+        );
+		
+		switch($plano->formapagamento) {
+            case 'creditcard':
+                $dados['PaymentMethodCreditCard'] = [
+                    'Card' => [],
+                ];
+                break;
+            case 'boleto':
+                $dados['PaymentMethodBoleto'] = [
+                    'instructions' => "Boleto de pagamento",
+                ];
+                break;
+            case 'pix':
+                $dados['PaymentMethodPix'] = [
+                    'instructions' => "Pagamento via pix",
+                ];
+                break;
+            default:
+			   $retorno->mensagem          	= "Contrato ID $contrato_id forma de pagamento inválida";
+			   return $retorno;
+        }
+		
+		$dados['ExtraFields'] 				= [
+												[
+													'tagName'  => 'CP_VENDEDOR',
+													'tagValue' => $contrato->vendedor->nome
+												]
+											  ];
+	
+
+		//Log::info("charges", ['dados' => $dados ]);
+				
+		$charges                        	= CelCash::storeCharges($dados);
+		
+		//Log::info("charges", ['charges' => $charges ]);
+		
+		if ($charges->ok != 'S')
+		{
+			$retorno->mensagem				= $charges->mensagem;
+			return $retorno;
+		}
+		
+		$retorno							= $charges->response;
+		$retorno->ok 						= 'S';
+		return $retorno;
+		
+	}
+	
+	public static function storeCharges($payload)
+    {
+        $retorno 						 = new stdClass();
+        $retorno->ok                     = "N";
+
+        $token                           = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/charges";
+
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+        $retorno->mensagem              = CelCash::buscarMensagem($statcode, $response);
+
+        if ($statcode == 200) 
+        {
+            $retorno->ok                = "S";
+        }
+
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+	
+	public static function storeChargesAgendamento($payload)
+    {
+        $retorno 						 = new stdClass();
+        $retorno->ok                     = "N";
+
+        $token                           = CelCash::TokenAgendamento();
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/charges";
+
+
+		Log::info("token", ['token,' => $token->token]);
+		Log::info("endpoint", ['endpoint,' => $endpoint]);
+		Log::info("change", ['change' => $payload]);
+
+        try {
+            $hresponse                  = Http::timeout(720)  		 
+												->withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->statcode = 408; // Código HTTP específico para timeout
+            // Mensagem mais amigável e informativa
+            if (strpos($e->getMessage(), 'timed out') !== false) 
+			{
+                $retorno->mensagem = "Tempo limite excedido ao conectar com a API CelCash. Por favor, tente novamente mais tarde.";
+                Log::error("Timeout na API CelCash: " . $e->getMessage() . " - Endpoint: $endpoint");
+            } else {
+                $retorno->mensagem = "Erro de conexão com a API CelCash: " . $e->getMessage();
+                Log::error("Erro de conexão com API CelCash: " . $e->getMessage() . " - Endpoint: $endpoint");
+            }
+            return $retorno;
+        } catch (RequestException $e) {
+           $retorno->error 		= true;
+           $retorno->statcode 	= $e->getCode() ?: 500;
+            // Mensagem mais detalhada para outros erros de requisição
+           $retorno->mensagem 	= "Falha na requisição para API CelCash: " . $e->getMessage();
+           Log::error("Erro na requisição para API CelCash: " . $e->getMessage() . " - Endpoint: $endpoint");  
+           return $retorno;
+        } catch (\Exception $e) {
+            // Captura qualquer outra exceção não prevista
+            $retorno->error 	= true;
+            $retorno->statcode 	= 500;
+            $retorno->mensagem 	= "Erro inesperado ao processar requisição: " . $e->getMessage();
+            Log::error("Erro inesperado na comunicação com API CelCash: " . $e->getMessage() . " - Endpoint: $endpoint");
+            return $retorno;
+        }   
+
+		Log::info("response", ['response' => $response]);
+
+		if (($statcode == 408) or ($statcode == 504))
+		{
+			$retorno->mensagem          = "Cell Cash passando por instabilidade!";
+		} else {
+			$retorno->mensagem          = CelCash::buscarMensagem($statcode, $response);
+		}
+
+        if ($statcode == 200) 
+        {
+            $retorno->ok                = "S";
+        }
+
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+		
+    public static function putCustomerIF($cellcash,$cliente,$galaxid=1)
+	{
+		$customer 											= $cellcash->Customers[0];
+		$rcustomer 											= clone $customer;
+		
+		$galaxPayId											= $customer->galaxPayId;
+		
+		unset($customer->myId);
+		unset($customer->galaxPayId);
+		unset($customer->document);
+		unset($customer->createdAt);
+		unset($customer->updatedAt);
+		
+		$alterou											= false;
+		$emails												= "";
+		$phones												= "";
+		
+		if (isset($customer->emails[0]))
+		{			
+			$emails											= $customer->emails[0];
+		}
+		
+		if (isset($customer->phones[0]))
+		{
+			$phones											= $customer->phones[0];
+		}
+		
+		if (isset($customer->ExtraFields))
+		{
+			$ExtraFields									= $customer->ExtraFields;
+		} else {
+			$ExtraFields									= array();
+		}
+		
+		unset($customer->emails);
+		unset($customer->phones);
+		unset($customer->ExtraFields);
+		
+		if ($emails !="")
+		{			
+			if ($emails != $cliente->email)
+			{
+				$alterou 									= true;
+				$customer->emails							= array();
+				$customer->emails[]							= $cliente->email;
+				$rcustomer->emails							= $customer->emails;
+			}
+		}
+		
+		if ($phones !="")
+		{
+			$telefone 											= preg_replace('/\D/', '', $cliente->telefone);
+			if ($phones != $telefone)
+			{
+				$alterou 										= true;
+				$customer->phones								= array();
+				$customer->phones[]								= $telefone;
+				$rcustomer->phones								= $customer->phones;
+			}
+		}
+		
+		if ($customer->status != 'active')
+		{
+			$alterou 										= true;
+			$customer->status								= 'active';
+		}
+		if ($customer->name != $cliente->nome)
+		{
+			$alterou 										= true;
+			$customer->name									= $cliente->nome;
+			$rcustomer->name								= $customer->name;
+		}
+		$cep 												= preg_replace('/\D/', '', $cliente->cep);
+		if ($customer->Address->zipCode != $cep)
+		{
+			$alterou 										= true;
+			$customer->Address->zipCode						= $cep;
+			$rcustomer->Address->zipCode					= $customer->Address->zipCode;
+		}
+		if ($customer->Address->street != $cliente->logradouro)
+		{
+			$alterou 										= true;
+			$customer->Address->street						= $cliente->logradouro;
+			$rcustomer->Address->street						= $customer->Address->street;
+		}
+		if ($customer->Address->number != $cliente->numero)
+		{
+			$alterou 										= true;
+			if (Cas::nulltoSpace($customer->Address->number) =="")
+			{
+				$cliente->numero							= 's/n';
+			}
+			$customer->Address->number						= $cliente->numero;
+			$rcustomer->Address->number						= $customer->Address->number;
+		}
+		if ($customer->Address->complement != $cliente->complemento)
+		{
+			$alterou 										= true;
+			$customer->Address->complement					= $cliente->complemento;
+			$rcustomer->Address->complement					= $customer->Address->complement;
+		}
+		if ($customer->Address->neighborhood != $cliente->bairro)
+		{
+			$alterou 										= true;
+			$customer->Address->neighborhood				= $cliente->bairro;
+			$rcustomer->Address->neighborhood				= $customer->Address->neighborhood;
+		}
+		if ($customer->Address->city != $cliente->cidade)
+		{
+			$alterou 										= true;
+			$customer->Address->city						= $cliente->cidade;
+			$rcustomer->Address->city						= $customer->Address->city;
+		}
+		if ($customer->Address->state != $cliente->estado)
+		{
+			$alterou 										= true;
+			$customer->Address->state						= $cliente->estado;
+			$rcustomer->Address->state						= $customer->Address->state;
+		}
+		
+		if ($cliente->tipo == 'F')
+		{
+			if ($cliente->sexo == 'M')
+			{
+				$sexo 											= 'Masculino';
+			} else {
+				if ($cliente->sexo == 'F')
+				{
+					$sexo 										= 'Feminino';
+				} else {
+					$sexo 										= "";
+				}
+			}			
+			
+			if (($cliente->data_nascimento != '1900-01-01') and (!is_null($cliente->data_nascimento)))
+			{
+				list($ano,$mes,$dia)        					= explode("-", $cliente->data_nascimento);
+				$data_nascimento            					= $dia . "/" . $mes . "/" . $ano;
+				$cp_data_nascimento 							= true;
+			} else {
+				$data_nascimento								= "";
+				$cp_data_nascimento 							= false;
+			}
+			
+			$cp_sexo 											= true;
+			
+			if (isset($ExtraFields))
+			{
+				foreach ($ExtraFields as $extrafield)
+				{
+					switch ($extrafield->tagName) {
+						case 'CP_DATA_NASCIMENTO':
+							if ($extrafield->tagValue == $data_nascimento)
+							{
+								$cp_data_nascimento 			= false;
+							}
+							break;
+						case 'CP_SEXO':
+							if ($extrafield->tagValue == $sexo)
+							{
+								$cp_sexo 						= false;
+							}
+							break;
+					}
+				}
+			}
+			if ((($cp_data_nascimento) or ($cp_sexo)) and (($data_nascimento !="") or ($sexo !="")))
+			{
+				$customer->ExtraFields							= array();
+				if (($cp_data_nascimento) and ($data_nascimento !=""))
+				{
+					$extrafield 				    			= new stdClass();
+					$extrafield->tagName						= "CP_DATA_NASCIMENTO";
+					$extrafield->tagValue						= $data_nascimento;
+					$customer->ExtraFields[] 					= $extrafield;
+				}
+				if (($cp_sexo) and ($sexo !=""))
+				{
+					$extrafield 				    			= new stdClass();
+					$extrafield->tagName						= "CP_SEXO";
+					$extrafield->tagValue						= $sexo;
+					$customer->ExtraFields[] 					= $extrafield;
+				}
+			}
+		}
+		
+		if ($alterou)
+		{
+			$pcustomer										= CelCash::updateCustomers($customer,$galaxPayId,$galaxid);
+		} 
+		
+		$retorno 				    						= new stdClass();
+		$retorno->Customers									= array();
+		$retorno->Customers[]								= $rcustomer;
+		
+		return $retorno;
+	}
+	
+	public static function getStoreCustomers($id)
+    {
+        $retorno                            = new stdClass();
+        $retorno->ok                        = 'N';
+        $retorno->mensagem                  = '';
+
+        $cliente 			                = \App\Models\Cliente::find($id);
+
+        if (!isset($cliente->id)) 
+        {
+            $retorno->mensagem              = "Cliente não encontrado. #$id";
+            return $retorno;
+        }
+
+		if ($cliente->email == "")
+		{
+			$retorno->mensagem          	= "Favor informar o email do cliente";
+            return $retorno;
+		}
+		
+		if ($cliente->cep == "")
+		{
+			$retorno->mensagem          	= "Favor informar o CEP do cliente";
+            return $retorno;
+		}
+		
+		if (($cliente->logradouro == "") or 	
+		    ($cliente->numero	  == "") or 
+            ($cliente->bairro	  == "") or
+            ($cliente->cidade 	  == "") or 
+            ($cliente->estado	  == ""))
+		{
+			$retorno->mensagem          	= "Favor informar o endereço completo do cliente";
+            return $retorno;
+		}
+		
+		$cpfcnpj							= preg_replace('/\D/', '', $cliente->cpfcnpj);
+		
+        $query                              = "documents=" .  $cpfcnpj . "&startAt=0&limit=1";
+		
+        $customer                           = CelCash::getCustomers($query);
+
+		//Log::info("c1", ['c1' => $customer ]);
+ 
+        if (isset($customer->Customers[0]))
+        {
+			$putcustomer 					= CelCash::putCustomerIF($customer,$cliente,1);
+			//$putcustomer->Customers[0]->galaxPayId  = $customer->Customers[0]->galaxPayId;
+            //$retorno             			= (object) $customer->Customers[0];
+			$retorno             			= (object) $putcustomer->Customers[0];
+			$retorno->ok                    = 'S';
+            return $retorno;
+        }
+        
+        if (isset($customer->statcode) and $customer->statcode != 200)
+        {
+            $retorno->mensagem              = 'Erro ao buscar o Cliente';
+
+            if (isset($customer->mensagem) and $customer->mensagem != "")
+            {
+                $retorno->mensagem          = $customer->mensagem;
+            }
+
+            return $retorno;
+        }
+
+        $cliente                            = CelCash::storeCliente($id);
+
+        if ($cliente->ok == "N")
+        {
+            $retorno->mensagem              = $cliente->mensagem;
+            return $retorno;
+        }
+
+        $retorno                			= $cliente->customers;
+		$retorno->ok                        = 'S';
+        return $retorno;
+    }
+	
+	public static function getStoreCustomersAgendamento($id)
+    {
+        $retorno                            = new stdClass();
+        $retorno->ok                        = 'N';
+        $retorno->mensagem                  = '';
+
+        $cliente 			                = \App\Models\Cliente::find($id);
+
+        if (!isset($cliente->id)) 
+        {
+            $retorno->mensagem              = "Cliente não encontrado. #$id";
+            return $retorno;
+        }
+
+		if ($cliente->cep == "")
+		{
+			$retorno->mensagem          	= "Favor informar o CEP do cliente";
+            return $retorno;
+		}
+		
+		if (($cliente->logradouro == "") or 	
+		    ($cliente->numero	  == "") or 
+            ($cliente->bairro	  == "") or
+            ($cliente->cidade 	  == "") or 
+            ($cliente->estado	  == ""))
+		{
+			$retorno->mensagem          	= "Favor informar o endereço completo do cliente";
+            return $retorno;
+		}
+		
+		if ($cliente->email == "")
+		{
+			$cliente->email					= 'sememail@cartaoamigosaude.com.br';
+		}
+		
+		$cpfcnpj							= preg_replace('/\D/', '', $cliente->cpfcnpj);
+		
+        $query                              = "documents=" .  $cpfcnpj . "&startAt=0&limit=1";
+		
+        $customer                           = CelCash::getCustomersAgendamento($query);
+		
+		//Log::info("customer", ['customer' => $customer ]);
+
+        if (isset($customer->Customers[0]))
+        {
+			/* é necessário verificar se tem divergencia de informações e atualizar o cliente no cell cash*/
+			$putcustomer 					= CelCash::putCustomerIF($customer,$cliente,2);
+            //$retorno             			= (object) $customer->Customers[0];
+			$retorno             			= (object) $putcustomer->Customers[0];
+			$retorno->ok                    = 'S';
+            return $retorno;
+        }
+        
+        if (isset($customer->statcode) and $customer->statcode != 200)
+        {
+            $retorno->mensagem              = 'Erro ao buscar o Cliente';
+
+            if (isset($customer->mensagem) and $customer->mensagem != "")
+            {
+                $retorno->mensagem          = $customer->mensagem;
+            }
+
+            return $retorno;
+        }
+
+        $cliente                            = CelCash::storeClienteAgendamento($id);
+
+        if ($cliente->ok == "N")
+        {
+            $retorno->mensagem              = $cliente->mensagem;
+            return $retorno;
+        }
+
+        $retorno                			= $cliente->customers;
+		$retorno->ok                        = 'S';
+        return $retorno;
+    }
+
+	public static function storeCliente($id)
+    {
+		$retorno                        = new stdClass();
+        $retorno->ok                    = 'N';
+        $retorno->mensagem              = '';
+
+        $cliente 			            = \App\Models\Cliente::find($id);
+
+        if (!isset($cliente->id)) 
+        {
+            $retorno->mensagem          = "Cliente não encontrado. #$cliente_id";
+            return $retorno;
+        }
+
+		if ($cliente->email == "")
+		{
+			$retorno->mensagem          = "Favor informar o email do cliente";
+            return $retorno;
+		}
+		
+		if ($cliente->cep == "")
+		{
+			$retorno->mensagem          = "Favor informar o CEP do cliente";
+            return $retorno;
+		}
+		
+		if (($cliente->logradouro == "") or 	
+		    ($cliente->numero	  == "") or 
+            ($cliente->bairro	  == "") or
+            ($cliente->cidade 	  == "") or 
+            ($cliente->estado	  == ""))
+		{
+			$retorno->mensagem          = "Favor informar o endereço completo do cliente";
+            return $retorno;
+		}
+		
+		$cpfcnpj						= preg_replace('/\D/', '', $cliente->cpfcnpj);
+		
+        $dados = array(
+            'myId'          			=> $cliente->id,
+            'name'          			=> $cliente->nome,
+            'document'      			=> $cpfcnpj,
+            'emails'        			=>  array(
+                $cliente->email,
+            ),
+            'phones' => array(
+                preg_replace('/\D/', '',$cliente->telefone),
+            ),
+            'Address' => array(
+                'zipCode'       		=> preg_replace('/\D/', '',$cliente->cep),
+                'street'        		=> $cliente->logradouro,
+                'number'        		=> trim($cliente->numero),
+                'neighborhood'  		=> $cliente->bairro,
+                'city'          		=> $cliente->cidade,
+                'state'         		=> $cliente->estado,
+                'complement'    		=> $cliente->complemento,
+            )
+        );
+
+		if ($cliente->sexo == 'M')
+		{
+			$sexo 						= 'Masculino';
+		} else {
+			$sexo 						= 'Feminino';
+		}
+		
+		if (substr_count($cliente->data_nascimento, '-') == 2)
+		{
+			list($ano,$mes,$dia)        	= explode("-", $cliente->data_nascimento);
+			$data_nascimento            	= $dia . "/" . $mes . "/" . $ano;
+						
+			 
+			$dados['ExtraFields'] 			= array(
+					array(
+						'tagName'   => 'CP_DATA_NASCIMENTO',
+						'tagValue'  => $data_nascimento
+					),
+					array(
+						'tagName'   => 'CP_SEXO',
+						'tagValue'  => $sexo
+					)
+			);
+		}
+		//Log::info("dados", ['customer' => $dados ]);
+
+        $cstore                     	= CelCash::storeCustomers($dados);
+
+        if ($cstore->ok == 'N')
+        {
+            $retorno->mensagem        	= $cstore->mensagem;
+            return $retorno;
+        }
+
+        $retorno->ok                  	= 'S';
+        $retorno->customers            	= $cstore->response;
+        return $retorno;
+	}
+	
+	public static function storeClienteAgendamento($id)
+    {
+		$retorno                        = new stdClass();
+        $retorno->ok                    = 'N';
+        $retorno->mensagem              = '';
+
+        $cliente 			            = \App\Models\Cliente::find($id);
+
+        if (!isset($cliente->id)) 
+        {
+            $retorno->mensagem          = "Cliente não encontrado. #$cliente_id";
+            return $retorno;
+        }
+
+		if ($cliente->cep == "")
+		{
+			$retorno->mensagem          = "Favor informar o CEP do cliente";
+            return $retorno;
+		}
+		
+		if (($cliente->logradouro == "") or 	
+		    ($cliente->numero	  == "") or 
+            ($cliente->bairro	  == "") or
+            ($cliente->cidade 	  == "") or 
+            ($cliente->estado	  == ""))
+		{
+			$retorno->mensagem          = "Favor informar o endereço completo do cliente";
+            return $retorno;
+		}
+		
+		if ($cliente->email == "")
+		{
+			$cliente->email				= 'sememail@cartaoamigosaude.com.br';
+		}
+		
+		$cpfcnpj						= preg_replace('/\D/', '', $cliente->cpfcnpj);
+		
+        $dados = array(
+            'myId'          			=> $cliente->id,
+            'name'          			=> $cliente->nome,
+            'document'      			=> $cpfcnpj,
+            'emails'        			=>  array(
+                $cliente->email,
+            ),
+            'phones' => array(
+                preg_replace('/\D/', '',$cliente->telefone),
+            ),
+            'Address' => array(
+                'zipCode'       		=> preg_replace('/\D/', '',$cliente->cep),
+                'street'        		=> $cliente->logradouro,
+                'number'        		=> trim($cliente->numero),
+                'neighborhood'  		=> $cliente->bairro,
+                'city'          		=> $cliente->cidade,
+                'state'         		=> $cliente->estado,
+                'complement'    		=> $cliente->complemento,
+            )
+        );
+
+		if ($cliente->sexo == 'M')
+		{
+			$sexo 						= 'Masculino';
+		} else {
+			$sexo 						= 'Feminino';
+		}
+		
+		list($ano,$mes,$dia)        	= explode("-", $cliente->data_nascimento);
+		$data_nascimento            	= $dia . "/" . $mes . "/" . $ano;
+					 
+		$dados['ExtraFields'] 			= array(
+				array(
+					'tagName'   => 'CP_DATA_NASCIMENTO',
+					'tagValue'  => $data_nascimento
+				),
+				array(
+					'tagName'   => 'CP_SEXO',
+					'tagValue'  => $sexo
+				)
+		);
+		
+		//Log::info("dados", ['customer' => $dados ]);
+
+        $cstore                     	= CelCash::storeCustomersAgendamento($dados);
+
+        if ($cstore->ok == 'N')
+        {
+            $retorno->mensagem        	= $cstore->mensagem;
+            return $retorno;
+        }
+
+        $retorno->ok                  	= 'S';
+        $retorno->customers            	= $cstore->response;
+        return $retorno;
+	}
+	
+	public static function storeAgendamentoCharges($id)
+    {
+		$retorno 							= new stdClass();
+        $retorno->ok                    	= "N";
+		$retorno->mensagem 					= "";
+		
+		$agendamento                        = \App\Models\ClinicaBeneficiario::with('clinica','beneficiario','especialidade')->find($id);
+		
+		if (!isset($agendamento->id)) 
+        {
+            $retorno->mensagem          	= "Agendamento $id não encontrado";
+			return $retorno;
+        }
+		
+		$cliente_id 						= $agendamento->beneficiario->cliente_id;
+		
+		$cliente                        	= \App\Models\Cliente::find($cliente_id);
+		
+		if (!isset($cliente->id)) 
+        {
+            $retorno->mensagem          	= "Cliente do agendamento $id não encontrado";
+			return $retorno;
+        }
+		
+		if (($cliente->data_nascimento == '1900-01-01') or (is_null($cliente->data_nascimento)))
+		{
+			$retorno->mensagem          	= "Favor ajustar a idade do beneficiário";
+			return $retorno;
+		}
+		
+		$nome 								= $cliente->nome;
+		$cpf 								= $cliente->cpfcnpj;
+		
+		$idade 				    			= Carbon::createFromDate($cliente->data_nascimento)->age;
+		
+		if (($idade < 18) and ($agendamento->beneficiario->tipo == 'T'))
+		{
+			$retorno->mensagem          	= "Beneficiário titular deve ser maior que 18 anos";
+			return $retorno;
+		}
+		
+		if ($idade < 18)
+		{
+			$beneficiario               	= \App\Models\Beneficiario::with('contrato')->find($agendamento->beneficiario->id);
+			if (!isset($beneficiario->id)) 
+			{
+				$retorno->mensagem          = "Beneficiário do agendamento $id não encontrado";
+				return $retorno;
+			}
+				
+			if ($beneficiario->contrato->tipo == 'J')
+			{
+				$beneficiario               = \App\Models\Beneficiario::find($beneficiario->parent_id);
+				
+				if (!isset($beneficiario->id)) 
+				{
+					$retorno->mensagem          = "Beneficiário do agendamento $id não encontrado";
+					return $retorno;
+				}
+			
+				$cliente_id 				= $beneficiario->cliente_id;
+			} else {
+				$beneficiario               = \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
+																	  ->where('tipo','=','T')
+																	  ->first();
+				if (!isset($beneficiario->id)) 
+				{
+					$retorno->mensagem      = "Beneficiário do agendamento $id não encontrado";
+					return $retorno;
+				}
+				$cliente_id 				= $beneficiario->cliente_id;
+			}
+			
+			$cliente                        = \App\Models\Cliente::find($cliente_id);
+		
+			if (!isset($cliente->id)) 
+			{
+				$retorno->mensagem          = "Cliente Titular do agendamento $id não encontrado";
+				return $retorno;
+			}
+			
+			if (($cliente->data_nascimento == '1900-01-01') or (is_null($cliente->data_nascimento)))
+			{
+				$retorno->mensagem          = "Favor ajustar a idade do beneficiário Titular";
+				return $retorno;
+			}
+			
+			$idade 				    		= Carbon::createFromDate($cliente->data_nascimento)->age;
+			
+			if ($idade < 18)
+			{
+				$retorno->mensagem          = "Beneficiário titular deve ser maior que 18 anos";
+				return $retorno;
+			}
+		}
+		
+		$customer                   		= CelCash::getStoreCustomersAgendamento($cliente_id);
+		
+		//Log::info("customer", ['customer' => $customer ]);
+		
+		if ($customer->ok == "N")
+        {
+			$retorno->mensagem          	= $customer->mensagem;
+			return $retorno;
+        }
+		
+		if (isset($customer->galaxPayId))
+		{
+			$ccliente						= $customer;
+		}
+		
+		if (isset($customer->customers->galaxPayId))
+		{
+			$ccliente						= $customer->customers;
+		}
+		
+		if (isset($customer->customers->Customer->galaxPayId))
+		{
+			$ccliente						= $customer->customers->Customer;
+		}
+		
+		if (isset($customer->customer->Customer->galaxPayId))
+		{
+			$ccliente						= $customer->customer->Customer;
+		}
+		
+		if (!isset($ccliente->galaxPayId))
+		{
+			$retorno->mensagem          	= 'Não conseguiu mapear o cliente. Problema no Cel Cash';
+			return $retorno;
+		}
+		
+		switch($agendamento->forma) {
+            case 'creditcard':
+			case 'C':
+               $formapagamento				= 'creditcard';
+                break;
+            case 'B':
+                $formapagamento				= 'boleto';
+                break;
+            case 'P':
+                $formapagamento				= 'PIX';
+                break;
+            default:
+			   $formapagamento				= 'boleto';
+        }
+		
+		if (is_null($agendamento->vencimento))
+		{
+			$subDays						= 2;
+			
+			$agendardata					= substr($agendamento->agendamento_data_hora,0,10);
+			$vencimento						= Carbon::parse($agendardata)->subDays($subDays)->format('Y-m-d');
+			
+			if ($vencimento < date('Y-m-d'))
+			{
+				$retorno->mensagem          = 'Data de vencimento não pode ser menor que hoje';
+				return $retorno;
+			}
+		} else {
+			$vencimento						= $agendamento->vencimento;
+		}
+		
+		if ($agendamento->tipo == 'C')
+		{
+			$tipo 							= 'Consulta';
+		} else {
+			$tipo 							= 'Exame';
+		}
+		
+		$instrucoes 						= "Pagamento referente a especialidade " . $agendamento->especialidade->nome;
+		
+		$dados = array(
+				'myId'                  	=> $id . '#' . bin2hex(random_bytes(5)),
+				'payday'                	=> $vencimento,
+				'value'                 	=> intval($agendamento->valor_a_pagar * 100),
+				'additionalInfo'			=> "",
+				"payedOutsideGalaxPay"  	=> false,
+				"mainPaymentMethodId"   	=> $formapagamento,
+				"Customer"              	=> [
+					"myId"              	=> $ccliente->myId,
+					"galaxPayId"        	=> $ccliente->galaxPayId,
+					"name"              	=> $cliente->nome, //$ccliente->name,
+					"document"          	=> $ccliente->document,
+					"emails"            	=> $ccliente->emails,
+					"phones"            	=> $ccliente->phones,
+					"Address"           	=> $ccliente->Address
+				],
+        );
+		
+		if ($agendamento->parcelas ==0)
+		{
+			$minparcelas 					= 1;
+			$maxparcelas 					= 1;
+		} else {
+			$minparcelas 					= 1;
+			$maxparcelas 					= $agendamento->parcelas;
+		}
+		 
+		switch($formapagamento) {
+            case 'creditcard':
+                $dados['PaymentMethodCreditCard'] = [
+					'Link' => [
+						'minInstallment' => $minparcelas,
+						'maxInstallment' => $maxparcelas,
+					],
+                    'Card' 	=> [],
+					'qtdInstallments' => $maxparcelas,
+                ];
+                break;
+            case 'boleto':
+                $dados['PaymentMethodBoleto'] = [
+                    'instructions' => $instrucoes,
+                ];
+                break;
+            case 'pix':
+                $dados['PaymentMethodPix'] = [
+                    'instructions' => $instrucoes,
+                ];
+                break;
+            default:
+			   $retorno->mensagem          	= "Agendamento ID $id forma de pagamento inválida";
+			   return $retorno;
+        }
+		
+		//Log::info("charges", ['dados' => $dados ]);
+				
+		$charges                        	= CelCash::storeChargesAgendamento($dados);
+		
+		//Log::info("charges", ['charges' => $charges ]);
+		
+		if ($charges->ok != 'S')
+		{
+			$retorno->mensagem				= $charges->mensagem;
+			return $retorno;
+		}
+	
+		if (!isset($charges->response->Charge->myId))
+		{
+			 $retorno->mensagem          	= "Dados da cobrança não encontrada";
+			 return $retorno;
+		}
+	
+		$agendamento                        = \App\Models\ClinicaBeneficiario::find($id);
+		
+		if (!isset($agendamento->id)) 
+        {
+            $retorno->mensagem          	= "Agendamento $id não encontrado";
+			return $retorno;
+        }
+						
+		$agendamento->galaxPayId			= $charges->response->Charge->Transactions[0]->galaxPayId;
+        $agendamento->paymentLink			= $charges->response->Charge->paymentLink;
+        $agendamento->myId					= $charges->response->Charge->myId;
+		$agendamento->status				= $charges->response->Charge->Transactions[0]->status;
+		 
+        
+		if (isset(($charges->response->Charge->Transactions[0]->Boleto)))
+		{
+			if (isset(($charges->response->Charge->Transactions[0]->Boleto->pdf)))
+			{
+				$agendamento->boletopdf	= $charges->response->Charge->Transactions[0]->Boleto->pdf;
+			}
+			if (isset(($charges->response->Charge->Transactions[0]->Boleto->bankNumber)))
+			{
+				$agendamento->boletobankNumber	= $charges->response->Charge->Transactions[0]->Boleto->bankNumber;
+			}
+		}
+		
+		$agendamento->pixpage					= "";
+		$agendamento->pixqrCode					= "";
+		
+		if (isset(($charges->response->Charge->Transactions[0]->Pix)))
+		{
+			if (isset(($charges->response->Charge->Transactions[0]->Pix->page)))
+			{
+				$agendamento->pixpage			= $charges->response->Charge->Transactions[0]->Pix->page;
+			}
+			if (isset(($charges->response->Charge->Transactions[0]->Pix->image)))
+			{
+				$agendamento->piximage			= $charges->response->Charge->Transactions[0]->Pix->image;
+			}
+			if (isset(($charges->response->Charge->Transactions[0]->Pix->qrCode)))
+			{
+				$agendamento->pixqrCode			= $charges->response->Charge->Transactions[0]->Pix->qrCode;
+			}
+		}
+   
+    	$agendamento->response 				= json_encode($charges->response->Charge);
+		$agendamento->vencimento			= $vencimento;
+		$agendamento->asituacao_id 			= 4;
+		$agendamento->save();
+		
+		$retorno							= $charges->response->Charge;
+		$retorno->asituacao_id				= $agendamento->asituacao_id;
+		$retorno->galaxPayId				= $agendamento->galaxPayId;
+		$retorno->paymentLink				= $agendamento->paymentLink;
+		$retorno->pixpage					= $agendamento->pixpage;
+		$retorno->pixqrCode					= $agendamento->pixqrCode;
+		$retorno->ok 						= 'S';
+		return $retorno;
+	}
+
+	public static function storeCustomers($payload)
+    {
+        $retorno                         = new stdClass();
+        $retorno->ok                     = 'N';
+        $retorno->mensagem               = '';
+        
+        $token                           = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $retorno->mensagem              = CelCash::buscarMensagem($statcode, $response);
+        $retorno->ok                    = $statcode == 200 ? "S" : "N";
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+	
+	public static function updateCustomers($payload,$galaxPayId,$galaxid=1)
+    {
+        $retorno                         = new stdClass();
+        $retorno->ok                     = 'N';
+        $retorno->mensagem               = '';
+        
+        $token                           = CelCash::Token($galaxid);
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/customers/$galaxPayId/galaxPayId";
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->put($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $retorno->mensagem              = CelCash::buscarMensagem($statcode, $response);
+        $retorno->ok                    = $statcode == 200 ? "S" : "N";
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+	
+	public static function storeCustomersAgendamento($payload)
+    {
+        $retorno                         = new stdClass();
+        $retorno->ok                     = 'N';
+        $retorno->mensagem               = '';
+        
+        $token                           = CelCash::TokenAgendamento();
+
+        if (!isset($token->token))
+        {
+            $retorno->mensagem           = "Erro ao buscar token #$token";
+            return $retorno;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $payload);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->message 			= $e;
+            return $retorno;
+        }
+
+        $retorno->mensagem              = CelCash::buscarMensagem($statcode, $response);
+        $retorno->ok                    = $statcode == 200 ? "S" : "N";
+        $retorno->response              = $response;
+
+        return $retorno;
+    }
+	
+	public static function getCustomers($query)
+    {
+        $retorno 						= new stdClass();
+        $token                           = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+        $endpoint                       .= "?";
+        $endpoint                       .= $query;
+
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+        if (($statcode != 200)) 
+        {
+            $retorno->mensagem 		    = CelCash::buscarMensagem($statcode, $response);
+            $retorno->statcode          = $statcode;
+            return $retorno;
+        }
+
+        $retorno                       = $response;
+
+        return $response;
+    }
+	
+	public static function getCustomersAgendamento($query)
+    {
+        $retorno 						= new stdClass();
+        $token                           = CelCash::TokenAgendamento();
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/customers";
+        $endpoint                       .= "?";
+        $endpoint                       .= $query;
+
+
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+        if (($statcode != 200)) 
+        {
+            $retorno->mensagem 		    = CelCash::buscarMensagem($statcode, $response);
+            $retorno->statcode          = $statcode;
+            return $retorno;
+        }
+
+        $retorno                       = $response;
+
+        return $response;
+    }
+	
+	public static function buscarMensagem($statcode, $response)
+    {
+        $mensagem                       = "";
+
+        switch ($statcode)
+        {
+            case 200:
+                $mensagem               = "Sucesso";		
+
+                if (isset($response->Charge->Transactions[0]->statusDescription))
+                {
+                    $mensagem           = $response->Charge->Transactions[0]->statusDescription;
+                }
+				if (isset($response->Subscription->Transactions[0]->statusDescription))
+                {
+                    $mensagem           = $response->Subscription->Transactions[0]->statusDescription;
+                }
+                break;
+            case 400:
+                $mensagem               =  "";
+
+                if (isset($response->error->details)) 
+                {
+					//Log::info("errors", ['response_error-'	=> $response->error->details  ]);
+                    $mensagem           = "Informe os seguintes campos para continuar: ";
+                    $virgula            = "";
+
+                    foreach ($response->error->details as $field => $messages) 
+                    {
+                        switch ($field)
+                        {
+                            case "documents":
+                                $field  = "CPF";
+                                break;
+                            case "emails":
+                            case "Customer.emails":
+                                $field  = "Email";
+                                break;
+                            case "zipCode":
+                                $field  = "CEP";
+                                break;
+                            case "street":
+                                $field  = "Rua";
+                                break;
+                            case "number":
+                                $field  = "Número da rua";
+                                break;
+                            case "neighborhood":
+                                $field  = "Bairro";
+                                break;
+                            case "city":
+                                $field  = "Cidade";
+                                break;
+                            case "state":
+                                $field  = "Estado";
+                                break;
+                        }
+
+                        $mensagem       .= $virgula . "{$field}";
+                        $virgula         = ", ";
+                    }
+                }
+
+                if (isset($response->error->message) and $mensagem == "")
+                {
+                    $mensagem               = $response->error->message;
+                    return $mensagem;
+                }
+                break;
+            case 401:
+                $mensagem               = "Falha ao autenticar.";
+                break;
+            case 403:
+                $mensagem               = "Erros de validação de segurança.";
+                break;
+        }
+
+        if ($mensagem == "")
+        {
+            $mensagem               = "Erro não identificado.";
+        }
+
+        return $mensagem;
+    }
+	
+	public static function cancelarContrato($id)
+    {
+		$retorno 							= new stdClass();
+        $retorno->ok                    	= "N";
+		
+		$contrato 			            	= \App\Models\Contrato::find($id);
+
+        if (!isset($contrato->id)) 
+        {
+			$retorno->mensagem          	= "Contrato ID $id não encontrado";
+			return $retorno;
+		}
+		
+		$cancelar 							= CelCash::cancelSubscriptions($contrato->galaxPayId);
+		
+		if ((isset($cancelar->statcode)) and ($cancelar->statcode == 200))
+		{
+			$retorno->ok                   	= "S";
+			return $retorno;
+		}
+		
+		if (isset($cancelar->error->message))
+		{
+			$retorno->mensagem				= $cancelar->error->message;
+		} else {
+			$retorno->mensagem				= "Ocorreu um erro não identificado no cancelamento";
+		}
+		
+		return $retorno;
+	}
+	
+	public static function cancelSubscriptions($id)
+    {
+		
+		$token                          = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/subscriptions/$id/galaxPayId";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->delete($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		Log::info("response", ['response' => $response ]);
+		Log::info("cancelSubscriptions", ['endpoint' => $endpoint ]);
+		
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function alterarTransaction($id,$body, $typeId='galaxPayId')
+    {
+		
+		$token                          = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/transactions/$id/$typeId";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->put($endpoint, $body);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		//Log::info("alterarTransaction", ['response' => $response ]);
+	
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function alterarCharges($id,$body, $typeId='galaxPayId', $galaxId=1)
+    {
+		
+		$token                          = CelCash::Token($galaxId);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/charges/$id/$typeId";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->put($endpoint, $body);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		//Log::info("alterarCharges", ['response' => $response ]);
+
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function adicionarTransaction($id,$body, $typeId='galaxPayId')
+    {
+		
+		$token                          = CelCash::Token();
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/transactions/$id/$typeId/add";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->post($endpoint, $body);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		//Log::info("adicionarTransaction", ['response' => $response ]);
+
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function cancelTransaction($id,$galaxid=1,$typeId="galaxPayId")
+    {
+		
+		$token                          = CelCash::Token($galaxid);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/transactions/$id/$typeId";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->delete($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		$response->galaxPayId			= $id;
+		$response->typeId				= $typeId;
+		$response->endpoint				= $endpoint;
+		
+		//Log::info("cancelTransaction", ['response' => $response ]);
+
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function getTransaction($query,$galaxid=1)
+    {
+		
+		$token                          = CelCash::Token($galaxid);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/transactions?$query";
+		$statcode						= "";
+		
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->get($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+
+		//Log::info("getTransaction", ['response' => $response ]);
+
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+	}
+	
+	public static function cancelCharges($id,$galaxid=1,$typeId="galaxPayId")
+    {
+		
+		$token                          = CelCash::Token($galaxid);
+
+        if (!isset($token->token))
+        {
+            return                      $token;
+        }
+
+        $endpoint                       = $token->url . "/charges/$id/$typeId";
+     
+        try {
+            $hresponse                  = Http::withHeaders([
+                                                    'Authorization' => "Bearer $token->token",
+                                                    'Content-Type'  => 'application/json'
+                                                ])->delete($endpoint);
+            $statcode					= $hresponse->status();
+            $response 					= $hresponse->object();
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        } catch (RequestException $e) {
+            $retorno->error 			= true;
+            $retorno->statcode			= 500;
+            $retorno->mensagem 			= $e;
+            return $retorno;
+        }
+		
+		$response->galaxPayId			= $id;
+		$response->typeId				= $typeId;
+		$response->endpoint				= $endpoint;
+		
+		//Log::info("cancelar", ['cobranca' => $response ]);
+
+        $retorno                       	= $response;
+		$retorno->statcode              = $statcode;
+        return $retorno;
+		
+		
+	}
+	
+	public static function celcashPagamentoEmpresa($galaxId=1)
+	{ 
+		$consultas 							= array();
+		
+		$pagamentos 						= DB::table('contratos')
+												->where('status','=','active')
+												->where('tipo','=','J')
+												->get();
+		
+		foreach ($pagamentos as $pagamento)
+		{
+			if (\App\Models\Beneficiario::where('contrato_id','=',$pagamento->id)->where('ativo','=',1)->count() > 0)
+			{ 
+				$galaxPayId 												= $pagamento->galaxPayId;
+				$query                          							= "startAt=0&limit=100&galaxPayIds=". $galaxPayId;
+				$consulta 													= CelCash::GetCharges($query,$galaxId);
+				
+				if ((isset($consulta->Charges)) and (isset($consulta->Charges[0])))
+				{
+					$Charge													= $consulta->Charges[0];
+					if ((isset($Charge->Transactions)) and (isset($Charge->Transactions[0])))
+					{
+						$Transactions										= $Charge->Transactions[0];
+						if (isset($Transactions->paydayDate))
+						{
+							list($contrato_id,$parcela_id,$aleatorio)       = explode("#",$Transactions->chargeMyId);
+							$parcela              							= \App\Models\Parcela::find($parcela_id);
+							if (isset($parcela->id))
+							{
+								if ($parcela->galaxPayId == $Transactions->galaxPayId)
+								{
+									if (is_null($parcela->data_pagamento))
+									{
+										$parcela->data_pagamento			= substr($Transactions->paydayDate,0,10);
+										if ($parcela->save())
+										{
+											$consultas[]					= $Transactions->chargeMyId;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		return $consultas;
+	}
+	
+	public static function celcashPagamentoConsulta($galaxId=2)
+	{ 
+		$consultas 							= array();
+		$observacao5						= "";
+		$observacao6						= "";
+
+		$asituacao 		   					= \App\Models\Asituacao::find(5);
+
+		if (isset($asituacao->id))
+		{
+			$observacao5					= str_replace(array("<p>","</p>"),"",$asituacao->orientacao);
+			$whatsapp5						= $asituacao->whatsapp;
+			$whatsappc5						= $asituacao->whatsappc;
+		} 
+		
+		$asituacao 		   					= \App\Models\Asituacao::find(6);
+
+		if (isset($asituacao->id))
+		{
+			$observacao6					= str_replace(array("<p>","</p>"),"",$asituacao->orientacao);
+			$whatsapp6						= $asituacao->whatsapp;
+			$whatsappc6						= $asituacao->whatsappc;
+		} 
+		
+		$pagamentos 						= DB::table('clinica_beneficiario')
+												->where('asituacao_id','=',4)
+												->where('galaxPayId','>',0)
+												->get();
+		
+		foreach ($pagamentos as $pagamento)
+		{
+			$response 													= json_decode($pagamento->response);
+			$galaxPayId 												= $response->galaxPayId;
+			$query                          							= "startAt=0&limit=100&galaxPayIds=". $galaxPayId;
+			$consulta 													= CelCash::GetCharges($query,$galaxId);
+			
+			if ((isset($consulta->Charges)) and (isset($consulta->Charges[0])))
+			{
+				$Charge													= $consulta->Charges[0];
+				if ((isset($Charge->Transactions)) and (isset($Charge->Transactions[0])))
+				{
+					$Transactions										= $Charge->Transactions[0];
+					if (isset($Transactions->paydayDate))
+					{
+						$agendamento                       				= \App\Models\ClinicaBeneficiario::with('clinica')->find($pagamento->id);
+						if (isset($agendamento->id))
+						{
+							 $agendamento->asituacao_id     			= 6;
+							 $agendamento->pagamento_data_hora			= $Transactions->paydayDate;
+							 $agendamento->pagamento_por 				= 1;
+							 $agendamento->cmotivo_id 					= 0;
+							 $agendamento->pagamento					= substr($Transactions->paydayDate,0,10);
+							 if ($observacao6 !="")
+							 {
+								 $agendamento->observacao				= $observacao6;
+							 }
+							 if ($agendamento->save())
+							 {
+								 if (($whatsapp6 !="") or ($whatsappc6 !=""))
+								 {
+									 $beneficiario                      = \App\Models\Beneficiario::with('cliente')->find($agendamento->beneficiario_id);
+									 if (isset($beneficiario->id))
+									 {
+										Cas::gerarVoucherPDF($agendamento->id);
+										Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$beneficiario->cliente->telefone,$whatsapp6,1);
+										if ((Cas::nulltoSpace($whatsappc6) !="") and (Cas::nulltoSpace($agendamento->clinica->telefone) !=""))
+										{
+											Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$agendamento->clinica->telefone,$whatsappc6,1);
+										}
+									}
+								 }
+								 $historico            			    	= new \App\Models\AgendamentoHistorico();
+								 $historico->clinica_beneficiario_id	= $agendamento->id;
+								 $historico->user_id 					= 1;
+								 $historico->historico					= "Pagamento realizado em: " . date('d/m/Y H:i:s');	
+								 $historico->save();
+							 }
+							 $consultas[] 								= $Charge;
+						}
+					} else {
+						if (isset($Transactions->payday))
+						{
+							$hora 										= date('H');
+							$agendamento                       			= \App\Models\ClinicaBeneficiario::with('clinica')->find($pagamento->id);
+							if (isset($agendamento->id))
+							{
+								//continue;
+								if (($agendamento->vencimento < date('Y-m-d')) and ($agendamento->cmotivo_id <> 2) and (Cas::nulltoSpace($agendamento->galaxPayId) <> "") and ($hora > '12'))
+								{
+									
+									$agendamento->cmotivo_id 			= 2;
+									/*
+									$agendamento->asituacao_id 			= 5;
+									$agendamento->cancelado_data_hora	= date('Y-m-d H:i:s');
+									$agendamento->cancelado_por 		= 1;
+									$agendamento->galaxPayId			= "";
+									$agendamento->boletobankNumber		= 0;
+									$agendamento->paymentLink			= "";
+									$agendamento->boletopdf				= "";
+									$agendamento->pixpage				= "";
+									$agendamento->piximage				= "";
+									$agendamento->pixqrCode				= "";
+									*/
+									if ($observacao5 !="")
+									{
+										$agendamento->observacao		= $observacao5;
+									}
+									if ($agendamento->save())
+									{
+										if (($whatsapp5 !="") or ($whatsappc5 !=""))
+										{
+											$beneficiario              = \App\Models\Beneficiario::with('cliente')->find($agendamento->beneficiario_id);
+											if (isset($beneficiario->id))
+											{
+												Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$beneficiario->cliente->telefone,$whatsapp5,1);
+												if ((Cas::nulltoSpace($whatsappc5) !="") and (Cas::nulltoSpace($agendamento->clinica->telefone) !=""))
+												{
+													Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$agendamento->clinica->telefone,$whatsappc5,1);
+												}
+											}
+										}
+										$historico            			    	= new \App\Models\AgendamentoHistorico();
+										$historico->clinica_beneficiario_id		= $agendamento->id;
+										$historico->user_id 					= 1;
+										$historico->historico					= "Expirou prazo para pagamento em: " . date('d/m/Y H:i:s');	
+										$historico->save();
+									}
+									$consultas[] 						= $Charge;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		$pagamentos 						= DB::table('clinica_beneficiario')
+												->where('asituacao_id','=',5)
+												->where('galaxPayId','>',0)
+												->where('agendamento_data_hora','>',date('Y-m-d H:i:s'))
+												->get();
+		
+		foreach ($pagamentos as $pagamento)
+		{
+			$response 													= json_decode($pagamento->response);
+			$galaxPayId 												= $response->galaxPayId;
+			$query                          							= "startAt=0&limit=100&galaxPayIds=". $galaxPayId;
+			$consulta 													= CelCash::GetCharges($query,$galaxId);
+			
+			if ((isset($consulta->Charges)) and (isset($consulta->Charges[0])))
+			{
+				$Charge													= $consulta->Charges[0];
+				if ((isset($Charge->Transactions)) and (isset($Charge->Transactions[0])))
+				{
+					$Transactions										= $Charge->Transactions[0];
+					if (isset($Transactions->paydayDate))
+					{
+						$agendamento                       				= \App\Models\ClinicaBeneficiario::with('clinica')->find($pagamento->id);
+						if (isset($agendamento->id))
+						{
+							 $agendamento->asituacao_id     			= 6;
+							 $agendamento->pagamento_data_hora			= $Transactions->paydayDate;
+							 $agendamento->pagamento_por 				= 1;
+							 $agendamento->cmotivo_id 					= 0;
+							 $agendamento->pagamento					= substr($Transactions->paydayDate,0,10);
+							 if ($observacao6 !="")
+							 {
+								 $agendamento->observacao				= $observacao6;
+							 }
+							 if ($agendamento->save())
+							 {
+								 if (($whatsapp6 !="") or ($whatsappc6 !=""))
+								 {
+									 $beneficiario                      = \App\Models\Beneficiario::with('cliente')->find($agendamento->beneficiario_id);
+									 if (isset($beneficiario->id))
+									 {
+										Cas::gerarVoucherPDF($agendamento->id);
+										Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$beneficiario->cliente->telefone,$whatsapp6,1);
+										if ((Cas::nulltoSpace($whatsappc6) !="") and (Cas::nulltoSpace($agendamento->clinica->telefone) !=""))
+										{
+											Cas::enviarMensagemAgendamento($agendamento->id, $agendamento->beneficiario_id,$agendamento->clinica->telefone,$whatsappc6,1);
+										}
+									}
+								 }
+								 $historico            			    	= new \App\Models\AgendamentoHistorico();
+								 $historico->clinica_beneficiario_id	= $agendamento->id;
+								 $historico->user_id 					= 1;
+								 $historico->historico					= "Pagamento realizado em: " . date('d/m/Y H:i:s');	
+								 $historico->save();
+							 }
+							 $consultas[] 								= $Charge;
+						}
+					}
+				}
+			}
+		}
+		
+		return $consultas;
+	}
+	
+	public static function CelCashParcelasAvulsa($contrato_id)
+	{ 
+	
+		$parcelas				                						= \App\Models\Parcela::where('contrato_id','=',$contrato_id)  
+																							 ->where('galaxPayId','=',0)  
+																							 ->orderBy('nparcela')
+																							 ->get();
+																	 
+		foreach ($parcelas as $parcela)
+		{
+			if ($parcela->galaxPayId ==0)
+			{
+				CelCashParcelaAvulsaJob::dispatch($parcela->id)->onQueue('default');
+			}
+		}
+		
+	}
+	
+	public static function CelCashParcelaAvulsa($parcela_id)
+	{ 
+	
+		$charges														= CelCash::storeContratoCharges($parcela_id);
+				
+		if (($charges->ok == 'S') and (isset($charges->Charge)))
+		{
+				$scharge 												= CelCash::updateContratoWithCharge($charges->Charge);
+		}
+		
+	}
+	
+	public static function celcashPagamentoAvulso($galaxId=1)
+	{ 
+		$retornos 							= array();
+		
+		$sql                                = 'SELECT p.id FROM parcelas p JOIN contratos c ON p.contrato_id = c.id';
+		$sql								.=	' WHERE p.data_pagamento IS NULL';
+		$sql								.=	' 	AND p.data_baixa IS NULL';
+		$sql								.=	' 	AND p.data_vencimento < CURDATE()';
+		$sql								.=	" 	AND c.tipo = 'F'";
+		$sql								.=	" 	AND c.avulso = 'S'";
+		$sql								.=	" 	AND c.status in ('active','waitingPayment')";
+		$sql								.=	' ORDER BY p.data_vencimento ASC';
+
+		$vencidas 							= DB::connection('mysql')->select($sql);
+		
+		foreach ($vencidas as $vencida)
+		{
+			$retorno						= CelCash::CelCashParcelaConciliar($vencida->id);	
+			$retornos[] 					= $retorno;
+		}
+		
+		
+		$sql                                = 'SELECT p.id FROM parcelas p JOIN contratos c ON p.contrato_id = c.id';
+		$sql								.=	' WHERE p.data_pagamento IS NULL';
+		$sql								.=	' 	AND p.data_baixa IS NULL';
+		$sql								.=	' 	AND p.data_vencimento < CURDATE()';
+		$sql								.=	" 	AND c.tipo = 'J'";
+		$sql								.=	" 	AND c.status in ('active','waitingPayment')";
+		$sql								.=	' ORDER BY p.data_vencimento ASC';
+
+		$vencidas 							= DB::connection('mysql')->select($sql);
+		
+		foreach ($vencidas as $vencida)
+		{
+			$retorno						= CelCash::CelCashParcelaConciliar($vencida->id);	
+			$retornos[] 					= $retorno;
+		}
+		
+		return $retornos;
+	}
+	
+	public static function CelCashConsultaConciliar($galaxPayId)
+	{ 
+		$retorno								= new stdClass();
+		$retorno->status 						= 200;
+		$retorno->erro 							= false;
+		$retorno->dataPagamento					= "";
+		$retorno->dataBaixa						= "";
+		$retorno->mensagem						= "";
+		
+		if ($galaxPayId > 0)
+		{
+			$query								= 'startAt=0&limit=1&chargeGalaxPayIds=' . $galaxPayId;
+				
+			$transaction   						= CelCash::getTransaction($query,2);
+			
+			
+			if ((isset($transaction->Transactions)) and (isset($transaction->Transactions[0])))
+			{
+				if (isset($transaction->Transactions[0]->paydayDate))
+				{
+					$retorno->dataPagamento		= $transaction->Transactions[0]->paydayDate;
+				} else {
+					if ((isset($transaction->Transactions[0]->status)) and ($transaction->Transactions[0]->status == 'cancel'))
+					{
+						$retorno->dataBaixa		= $transaction->Transactions[0]->statusDate;
+					} 
+				}
+				$retorno->transaction			= $transaction->Transactions[0];		 
+			} else {
+				$retorno->status				= 404;
+				$retorno->erro 					= true;
+				$retorno->mensagem				= "A transação não foi encontrada no Cell Cash";
+			}
+		} else {
+			$retorno->status					= 404;
+			$retorno->erro 						= true;
+			$retorno->mensagem					= "Ainda não foi gerado a cobrança no Cell Cash";
+		}
+		
+		return $retorno;
+	}
+	
+	public static function CelCashParcelaConciliar($id)
+	{ 
+		
+		$retorno								= new stdClass();
+		$retorno->status 						= 200;
+		$retorno->erro 							= false;
+		$retorno->mudanca						= false;
+		$retorno->dataPagamento					= "";
+		$retorno->dataBaixa						= "";
+		$retorno->situacao						= "";
+		$retorno->mensagem						= "";
+		
+		$parcela                                = \App\Models\Parcela::with('contrato')->find($id);
+		
+		$query									= 'startAt=0&limit=1&';
+		
+		if (($parcela->contrato->tipo == 'J') or ($parcela->contrato->avulso == 'S'))
+		{
+			if ($parcela->contrato->tipo == 'J')
+			{
+				$galaxPayId						= $parcela->contrato->galaxPayId;
+			} else {
+				$galaxPayId						= $parcela->cgalaxPayId;
+			}
+			$query 								.= 'chargeGalaxPayIds=' . $galaxPayId;
+			$payid 								= $galaxPayId;
+		} else {
+			$query 								.= 'galaxPayIds=' . $parcela->galaxPayId;
+			$payid 								= $parcela->galaxPayId;
+		}
+	
+		if ($payid > 0)
+		{
+			$transaction   							= CelCash::getTransaction($query);
+			 
+			if ((isset($transaction->Transactions)) and (isset($transaction->Transactions[0])))
+			{
+				
+				//if (isset($transaction->Transactions[0]->chargeGalaxPayId))
+				//{
+				//	$chargeGalaxPayId				= $transaction->Transactions[0]->chargeGalaxPayId;
+				//}
+				
+				$myId								= "";
+				$chargeMyId							= "";
+				
+				if (isset($transaction->Transactions[0]->myId))
+				{
+					$myId							= $transaction->Transactions[0]->myId;
+				}
+				
+				if (isset($transaction->Transactions[0]->chargeMyId))
+				{
+					$chargeMyId						= $transaction->Transactions[0]->chargeMyId;
+				}
+				
+				if (isset($transaction->Transactions[0]->payday))
+				{
+					$data_vencimento				= $transaction->Transactions[0]->payday;
+				} else {
+					$data_vencimento				= $parcela->data_vencimento;
+				}
+				if (isset($transaction->Transactions[0]->paydayDate))
+				{
+					$data_pagamento					= substr($transaction->Transactions[0]->paydayDate,0,10);
+				} else {
+					$data_pagamento					= $parcela->data_pagamento;
+				}
+					
+				if ((isset($transaction->Transactions[0]->status)) and ($transaction->Transactions[0]->status == 'cancel'))
+				{
+					$data_baixa						= substr($transaction->Transactions[0]->statusDate,0,10);
+				} else {
+					$data_baixa						= $parcela->data_baixa;
+				}
+				if (($parcela->data_pagamento != $data_pagamento) or ($parcela->data_baixa != $data_baixa))
+				{
+					$retorno->mensagem				= "Atenção!! Houve mudança de situação";
+					$retorno->mudanca				= true;
+				} else {
+					$retorno->mensagem				= "Não houve mudança de situação";
+					$retorno->mudanca				= false;
+				}
+				$retorno->dataPagamento				= $data_pagamento;
+				$retorno->dataBaixa					= $data_baixa;
+				$retorno->situacao					= Cas::obterSituacaoParcela($data_vencimento,$data_pagamento,$data_baixa);
+					 
+				if ($retorno->mudanca)
+				{
+					$parcela->data_pagamento		= $data_pagamento;
+					$parcela->data_baixa			= $data_baixa;
+					$parcela->save();
+				}
+				$retorno->erro 						= false;
+			} else {
+				$retorno->status					= 404;
+				$retorno->erro 						= true;
+				$retorno->mensagem					= "A transação não foi encontrada no Cell Cash";
+			}
+		} else {
+			$retorno->status						= 404;
+			$retorno->erro 							= true;
+			$retorno->mensagem						= "Ainda não foi gerado a cobrança no Cell Cash";
+		}
+		return $retorno;
+	}
+	
+	// Função específica para verificar transação existente com filtros otimizados
+	public static function getTransactionForDuplicateCheck($cpf, $galaxPayId, $dataVencimento, $valor)
+	{
+		$retorno = new stdClass();
+		$retorno->ok = "N";
+		
+		$token = CelCash::Token();
+		
+		if (!isset($token->token)) {
+			$retorno->mensagem = "Erro ao buscar token";
+			return $retorno;
+		}
+		
+		// Query otimizada com filtros específicos e ordenação
+		$queryParams = [
+			'startAt' 				=> 0,
+			'customerGalaxPayIds' 	=> $galaxPayId,
+			'payDayFrom' 			=> $dataVencimento,
+			'payDayTo' 				=> $dataVencimento,
+			'limit' 				=> 1,
+			'order' 				=> 'createdAt.desc'  // Mais recente primeiro
+		];
+		
+		$query = http_build_query($queryParams);
+		$endpoint = $token->url . "/transactions?$query";
+		
+		try {
+			$hresponse = Http::withHeaders([
+				'Authorization' => "Bearer $token->token",
+				'Content-Type' => 'application/json'
+			])->get($endpoint);
+			
+			$statcode = $hresponse->status();
+			$response = $hresponse->object();
+			
+			Log::info("getTransactionForDuplicateCheck", [
+				'query' => $queryParams,
+				'response' => $response
+			]);
+			
+		} catch (\Exception $e) {
+			$retorno->error = true;
+			$retorno->statcode = 500;
+			$retorno->mensagem = $e->getMessage();
+			return $retorno;
+		}
+		
+		$retorno->response = $response;
+		$retorno->statcode = $statcode;
+		
+		if ($statcode == 200) {
+			$retorno->ok = "S";
+		}
+		
+		return $retorno;
+	}
+	
+	
+	public static function listarTransacoesVencimento($payDayFrom,$payDayTo,$customerGalaxPayId)
+    {
+      
+		$token 					= CelCash::Token();
+        
+        // Query otimizada com filtros específicos e ordenação
+		$query = [
+			'startAt' 				=> 0,
+			'limit' 				=> 100,
+			'customerGalaxPayIds' 	=> $customerGalaxPayId,
+			'payDayFrom'			=> $payDayFrom,
+			'payDayTo'				=> $payDayTo,
+			'status' 				=> 'captured,payedBoleto,payedPix,payExternal,cancelByContract,cancel,notSend',
+			'order' 				=> 'payday.asc'  
+		];
+        
+        $queryString 				= http_build_query($query);
+        
+    	$endpoint = $token->url . "/transactions?$queryString";
+		
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer $token->token",
+            'Content-Type' => 'application/json',
+        ])->get($endpoint);
+        
+        $responseData = $response->object();
+		
+		return $responseData;
+    }
+	
+	public static function listarTransacoesStatus($updateStatusFrom,$updateStatusTo,$start=0,$limite=100)
+    {
+      
+		$token 					= CelCash::Token();
+        
+        // Query otimizada com filtros específicos e ordenação
+		$query = [
+			'startAt' 			=> $start,
+			'limit' 			=> $limite,
+			'updateStatusFrom'	=> $updateStatusFrom,
+			'updateStatusTo'	=> $updateStatusTo,
+			'status' 			=> 'captured,payedBoleto,payedPix,payExternal,cancelByContract,cancel,notSend',
+			'order' 			=> 'payday.asc'  
+		];
+        
+        $queryString 			= http_build_query($query);
+        
+    	$endpoint = $token->url . "/transactions?$queryString";
+		
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer $token->token",
+            'Content-Type' => 'application/json',
+        ])->get($endpoint);
+        
+        $responseData = $response->object();
+		
+		return $responseData;
+    }
+
+    /**
+     * Lista transações por CPF a partir de uma data específica
+     * 
+     * @param string $cpf CPF do cliente
+     * @param string $dataInicio Data de início (formato Y-m-d), padrão 2025-01-01
+     * @param int $limite Limite de registros, padrão 100
+     * @return object Resposta da API com as transações encontradas
+     */
+    public static function listarTransacoesPorData($customerGalaxPayIds, $limite = 100)
+    {
+      
+		$token = CelCash::Token();
+        
+        // Query otimizada com filtros específicos e ordenação
+		$query = [
+			'startAt' => 0,
+			'customerGalaxPayIds' => $customerGalaxPayIds,
+			'limit' => $limite,
+			'order' => 'createdAt.desc'  // Mais recente primeiro
+		];
+        
+        $queryString = http_build_query($query);
+        
+       // Log::info('CelCash::listarTransacoesPorData - Query: ' . $queryString);
+        
+		$endpoint = $token->url . "/transactions?$queryString";
+		
+        $response = Http::withHeaders([
+            'Authorization' => "Bearer $token->token",
+            'Content-Type' => 'application/json',
+        ])->get($endpoint);
+        
+        $responseData = $response->json();
+        
+        //Log::info('CelCash::listarTransacoesPorData - Response: ' . json_encode($responseData));
+        
+        return (object) [
+            'response' => $responseData,
+            'statcode' => $response->status()
+        ];
+    }
+
+    /**
+     * Extrai e formata dados específicos das transações
+     * 
+     * @param array $transacoes Array de transações da API
+     * @return array Array com dados formatados
+     */
+    public static function extrairDadosTransacoes($transacoes)
+    {
+        $dadosExtraidos = [];
+        
+        if (!isset($transacoes['Transactions']) || !is_array($transacoes['Transactions'])) {
+            return $dadosExtraidos;
+        }
+        
+        foreach ($transacoes['Transactions'] as $transacao) {
+            $item = [];
+            
+            // 1) Campos de Transactions
+            $item['transaction'] = [
+                'galaxPayId' => $transacao['galaxPayId'] ?? null,
+                'chargeGalaxPayId' => $transacao['chargeGalaxPayId'] ?? null,
+                'chargeMyId' => $transacao['chargeMyId'] ?? null,
+                'value' => $transacao['value'] ?? null,
+                'payday' => $transacao['payday'] ?? null,
+                'payedOutsideGalaxPay' => $transacao['payedOutsideGalaxPay'] ?? null,
+				'mainPaymentMethodId' => $transacao['Subscription']['mainPaymentMethodId'] ?? null,
+                'installment' => $transacao['installment'] ?? null,
+                'paydayDate' => $transacao['paydayDate'] ?? null,
+                'statusDate' => $transacao['statusDate'] ?? null,
+                'status' => $transacao['status'] ?? null,
+            ];
+            
+            // 2) Campos de Boleto
+            $item['boleto'] = [
+                'pdf' => $transacao['Boleto']['pdf'] ?? null,
+                'bankLine' => $transacao['Boleto']['bankLine'] ?? null,
+                'bankAgency' => $transacao['Boleto']['bankAgency'] ?? null,
+                'bankAccount' => $transacao['Boleto']['bankAccount'] ?? null
+            ];
+            
+            // 3) Campos de Charge
+            $item['charge'] = [
+                'galaxPayId' => $transacao['Charge']['galaxPayId'] ?? null,
+                'myId' => $transacao['Charge']['myId'] ?? null,
+                'mainPaymentMethodId' => $transacao['Charge']['mainPaymentMethodId'] ?? null,
+                'value' => $transacao['Charge']['value'] ?? null,
+                'status' => $transacao['Charge']['status'] ?? null
+            ];
+            
+            // 4) Campos de Customer dentro do Charge
+            $item['customer'] = [
+                'name' => $transacao['Charge']['Customer']['name'] ?? null,
+                'document' => $transacao['Charge']['Customer']['document'] ?? null
+            ];
+            
+            $dadosExtraidos[] = $item;
+        }
+        
+        return $dadosExtraidos;
+    }
+
+    public static function verificarTransacaoExistente($cpf, $galaxPayId, $dataVencimento, $valor)
+    {
+		$retorno = new stdClass();
+		$retorno->existe = false;
+		$retorno->transacao = null;
+		$retorno->mensagem = "";
+		
+		// Busca transação com filtros otimizados
+		$resultado = CelCash::getTransactionForDuplicateCheck($cpf, $galaxPayId, $dataVencimento, $valor);
+		
+		if ($resultado->ok != "S") {
+			$retorno->mensagem = "Erro ao consultar transações: " . ($resultado->mensagem ?? 'Erro desconhecido');
+			return $retorno;
+		}
+		
+		// Verifica se encontrou transações
+		if (isset($resultado->response->Transactions) && count($resultado->response->Transactions) > 0) {
+			$transacaoEncontrada = $resultado->response->Transactions[0];
+			if (isset($transacaoEncontrada->value)) 
+			{
+				if (isset($transacaoEncontrada->Charge->Customer->document))
+				{					
+					if ($transacaoEncontrada->Charge->Customer->document !== $cpf)
+					{
+						$retorno->mensagem = "Nenhuma transação encontrada para os critérios especificados";
+						return $retorno;
+					}
+				}
+			}
+			// Comparação EXATA do valor (sem tolerância)
+			if (isset($transacaoEncontrada->value)) {
+				$valorTransacao = (float) $transacaoEncontrada->value;
+				$valorComparacao = (float) ($valor * 100); // Valor em centavos
+				
+				if ($valorTransacao === $valorComparacao) {
+					// Verificar se a transação está em status aberto (não paga, cancelada, etc.)
+					$statusFechados = ['inactive','notSend', 'authorized', 'captured', 'denied', 'reversed','chargeback','payedBoleto','notCompensated','pendingPix','payedPix','unavailablePix','cancel','payExternal','cancelbycontract','free'];
+					$statusTransacao = strtolower($transacaoEncontrada->status ?? '');
+					
+					if (in_array($statusTransacao, $statusFechados)) {
+						$retorno->existe = false;
+						$retorno->transacao = $transacaoEncontrada;
+						$retorno->mensagem = "Transação encontrada mas com status fechado ($statusTransacao) - CPF: $cpf, Data: $dataVencimento, Valor: $valor";
+						
+						Log::info("Transação encontrada mas com status fechado", [
+							'cpf' => $cpf,
+							'data_vencimento' => $dataVencimento,
+							'valor' => $valor,
+							'status' => $statusTransacao,
+							'transacao_id' => $transacaoEncontrada->galaxPayId ?? 'N/A'
+						]);
+					} else {
+						$retorno->existe = true;
+						$retorno->transacao = $transacaoEncontrada;
+						$retorno->mensagem = "Transação duplicada encontrada (status aberto: $statusTransacao) - CPF: $cpf, Data: $dataVencimento, Valor: $valor";
+						
+						Log::info("Transação duplicada detectada (status aberto)", [
+							'cpf' => $cpf,
+							'data_vencimento' => $dataVencimento,
+							'valor' => $valor,
+							'status' => $statusTransacao,
+							'transacao' => $transacaoEncontrada,
+							'transacao_id' => $transacaoEncontrada->galaxPayId ?? 'N/A'
+						]);
+					}
+				} else {
+					$retorno->mensagem = "Transação encontrada mas com valor diferente - Esperado: $valor, Encontrado: " . ($valorTransacao / 100);
+					
+					Log::info("Transação com valor diferente", [
+						'cpf' => $cpf,
+						'valor_esperado' => $valor,
+						'valor_encontrado' => ($valorTransacao / 100)
+					]);
+				}
+			} else {
+				$retorno->mensagem = "Transação encontrada mas sem informação de valor";
+			}
+		} else {
+			$retorno->mensagem = "Nenhuma transação encontrada para os critérios especificados";
+		}
+		
+		return $retorno;
+	}
+	  
+	/**
+     * Faz o balanço entre dados extraídos das transações e registros da tabela parcelas
+     * 
+     * @param int $contratoId ID do contrato
+     * @param array $dadosExtraidos Dados extraídos das transações
+     * @return array Array com o balanço dos dados
+     */
+	 public static function balancearDadosTransacoesParcelas($contratoId, $transacoesExtraidas)
+	 {
+		DB::table('balancos')->where('contrato_id','=',$contratoId)->delete();	
+													
+		// Buscar todas as parcelas do contrato
+		$parcelas = \App\Models\Parcela::where('contrato_id', '=', $contratoId)->orderBy('nparcela')->get();
+		
+		$balance = [
+			//'resumo_transacoes' => [], // Apenas campos essenciais das transações
+			//'resumo_parcelas' => [], // Apenas campos essenciais das parcelas
+			'parcelas_com_transacao' => [],
+			'parcelas_sem_transacao' => [],
+			'transacoes_duplicadas' => [],
+			'transacoes_sem_parcela' => [],
+			'estatisticas' => [
+				'total_transacoes' => count($transacoesExtraidas),
+				'total_parcelas' => $parcelas->count(),
+				'parcelas_com_transacao' => 0,
+				'parcelas_sem_transacao' => 0,
+				'transacoes_duplicadas' => 0,
+				'transacoes_sem_parcela' => 0
+			]
+		];
+		/*
+		// Resumo das transações - apenas campos de comparação
+		foreach ($transacoesExtraidas as $index => $transacao) {
+			$balance['resumo_transacoes'][] = [
+				'index' => $index,
+				'galaxPayId' => $transacao['transaction']['galaxPayId'] ?? null,
+				'payday' => $transacao['transaction']['payday'] ?? null,
+				'paydayDate' => $transacao['transaction']['paydayDate'] ?? null,
+				'value' => $transacao['transaction']['value'] ?? null,
+				'status' => $transacao['transaction']['status'] ?? null
+			];
+		}
+		*/
+		// Resumo das parcelas - apenas campos de comparação
+		/*
+		foreach ($parcelas as $parcela) {
+			$balance['resumo_parcelas'][] = [
+				'id' => $parcela->id,
+				'galaxPayId' => $parcela->galaxPayId,
+				'data_vencimento' => $parcela->data_vencimento,
+				'data_pagamento' => $parcela->data_pagamento,
+				'valor' => $parcela->valor,
+				'status' => $parcela->status
+			];
+		}
+		*/
+		// Identificar duplicatas ANTES de processar
+		$transacoesPorChave = [];
+		$transacoesProcessadas = [];
+		
+		foreach ($transacoesExtraidas as $index => $transacao) {
+			$data 				= $transacao['transaction']['payday'] ?? null;
+			$galaxPayId 		= $transacao['transaction']['galaxPayId'] ?? null;
+			
+			if ($data && $galaxPayId) {
+				$dataNormalizada = date('Y-m-d', strtotime($data));
+				$chave = $galaxPayId . '_' . $dataNormalizada;
+				
+				if (isset($transacoesPorChave[$chave])) {
+					// É uma duplicata
+					$balance['transacoes_duplicadas'][] = [
+						'index_original' => $transacoesPorChave[$chave]['index'],
+						'index_duplicata' => $index,
+						'galaxPayId' => $galaxPayId,
+						'payday' => $data,
+						'paydayDate' => $transacao['transaction']['paydayDate'] ?? null,
+						'value' => $transacao['transaction']['value'] ?? null
+					];
+					$balance['estatisticas']['transacoes_duplicadas']++;
+				} else {
+					// Primeira ocorrência desta transação
+					$transacoesPorChave[$chave] = [
+						'index' => $index,
+						'transaction' => $transacao
+					];
+					$transacoesProcessadas[] = $transacao;
+				}
+			} else {
+				// Transação sem dados suficientes para verificar duplicata
+				$transacoesProcessadas[] = $transacao;
+			}
+		}
+		
+		// Agrupar transações válidas por galaxPayId
+		$transacoesPorGalaxyPayId = [];
+		foreach ($transacoesProcessadas as $transacao) {
+			$galaxPayId = $transacao['transaction']['galaxPayId'] ?? null;
+			if ($galaxPayId) {
+				// Apenas a primeira transação por galaxPayId será considerada
+				if (!isset($transacoesPorGalaxyPayId[$galaxPayId])) {
+					$transacoesPorGalaxyPayId[$galaxPayId] = $transacao;
+				}
+			}
+		}
+		
+		// Processar cada parcela
+		foreach ($parcelas as $parcela) {
+			$parcelaGalaxyPayId = $parcela->galaxPayId;
+			
+			if ($parcelaGalaxyPayId && isset($transacoesPorGalaxyPayId[$parcelaGalaxyPayId])) 
+			{
+				$transacaoCorrespondente = $transacoesPorGalaxyPayId[$parcelaGalaxyPayId];
+				$data_baixa 				= null;
+				
+				if (($transacaoCorrespondente['transaction']['status'] == 'cancel') and (Cas::temData($transacaoCorrespondente['transaction']['statusDate'])))
+				{
+					$data_baixa			    =  substr($transacaoCorrespondente['transaction']['statusDate'],0,10);
+				}
+				
+				$balance['parcelas_com_transacao'][] = [
+					'parcela_resumo' => [
+						'id' 				=> $parcela->id,
+						'galaxPayId' 		=> $parcela->galaxPayId,
+						'data_vencimento' 	=> $parcela->data_vencimento,
+						'data_pagamento' 	=> $parcela->data_pagamento,
+						'data_baixa'		=> $parcela->data_baixa,
+						'nparcela' 			=> $parcela->nparcela,
+						'valor' 			=> $parcela->valor,
+						'status' 			=> $parcela->status
+					],
+					'transacao_resumo' => [
+						'galaxPayId' 			=> $transacaoCorrespondente['transaction']['galaxPayId'] ?? null,
+						'mainPaymentMethodId' 	=> $transacaoCorrespondente['transaction']['mainPaymentMethodId'] ?? null,
+						'payday' 				=> $transacaoCorrespondente['transaction']['payday'] ?? null,
+						'paydayDate' 			=> $transacaoCorrespondente['transaction']['paydayDate'] ?? null,
+						'data_baixa'			=> $data_baixa,
+						'installment'			=> $transacaoCorrespondente['transaction']['installment'] ?? 0,
+						'value' 				=> $transacaoCorrespondente['transaction']['value'] ?? null,
+						'status' 				=> $transacaoCorrespondente['transaction']['status'] ?? null,
+						'response' 				=> $transacaoCorrespondente
+					],
+					'criterio_correspondencia' => 'galaxPayId'
+				];
+				$balance['estatisticas']['parcelas_com_transacao']++;
+				
+				if ($parcela->status != $transacaoCorrespondente['transaction']['status'])
+				{
+					  if (($parcela->status != 'closed') and ($transacaoCorrespondente['transaction']['status'] != 'payedBoleto'))
+					  {
+						  $balanco 					= new \App\Models\Balanco();
+						  $balanco->contrato_id		= $contratoId;
+						  $balanco->parcela_id		= $parcela->id;
+						  $balanco->nparcela		= $parcela->nparcela;
+						  $balanco->cpf				= $transacaoCorrespondente['customer']['document'] ?? "";
+						  $balanco->data_vencimento	= $parcela->data_vencimento;
+						  $balanco->data_pagamento	= $parcela->data_pagamento;
+						  $balanco->data_baixa		= $parcela->data_baixa;
+						  $balanco->valor			= $parcela->valor;
+						  $balanco->situacao		= $parcela->status;
+						  $balanco->galaxPayId		= $transacaoCorrespondente['transaction']['galaxPayId'] ?? 0;
+						  $balanco->cgalaxPayId		= $transacaoCorrespondente['transaction']['chargeGalaxPayId'] ?? 0;
+						  $balanco->payday			= $transacaoCorrespondente['transaction']['payday'] ?? null;
+						  $balanco->paydayDate 		= isset($transacaoCorrespondente['transaction']['paydayDate']) ? $transacaoCorrespondente['transaction']['paydayDate'] : null;
+						  $balanco->status			= $transacaoCorrespondente['transaction']['status'] ?? "";
+						  $balanco->value			= $transacaoCorrespondente['transaction']['value'] ?? 0;
+						  $balanco->tipo			= "PT";
+						  $balanco->save();
+					  }
+				}
+					
+				// Remover transação processada
+				unset($transacoesPorGalaxyPayId[$parcelaGalaxyPayId]);
+				
+			} else {
+				
+				$contrato 					= \App\Models\Contrato::with('cliente')->find($contratoId);
+				
+				$balanco 					= new \App\Models\Balanco();
+				$balanco->contrato_id		= $contratoId;
+				$balanco->parcela_id		= $parcela->id;
+				$balanco->nparcela			= $parcela->nparcela;
+				$balanco->cpf				= isset($contrato->cliente->cpfcnpj) ? $contrato->cliente->cpfcnp : "";
+				$balanco->data_vencimento	= $parcela->data_vencimento;
+				$balanco->data_pagamento	= $parcela->data_pagamento;
+				$balanco->data_baixa		= $parcela->data_baixa;
+				$balanco->valor				= $parcela->valor;
+				$balanco->situacao			= $parcela->status;
+				$balanco->galaxPayId		= $parcela->galaxPayId;
+				$balanco->cgalaxPayId		= $parcela->cgalaxPayId;
+				$balanco->payday			= null;
+				$balanco->paydayDate		= null;
+				$balanco->status			= "";
+				$balanco->value				= 0;
+				$balanco->tipo				= "PS";
+				$balanco->save();
+			
+				$balance['parcelas_sem_transacao'][] = [
+					'id' 				=> $parcela->id,
+					'galaxPayId' 		=> $parcela->galaxPayId,
+					'data_vencimento' 	=> $parcela->data_vencimento,
+					'data_pagamento' 	=> $parcela->data_pagamento,
+					'data_baixa'		=> $parcela->data_baixa,
+					'nparcela' 			=> $parcela->nparcela,
+					'valor' 			=> $parcela->valor,
+					'status' 			=> $parcela->status
+				];
+				$balance['estatisticas']['parcelas_sem_transacao']++;
+			}
+		}
+		
+		// Processar transações restantes
+		foreach ($transacoesPorGalaxyPayId as $galaxPayId => $transacao) 
+		{
+			
+			$parcela 		= \App\Models\Parcela::select('id','galaxPayId','nparcela','data_vencimento','data_pagamento','data_baixa','valor','status')
+													 ->where('contrato_id', '=', $contratoId)
+													 ->where('data_vencimento','=',$transacao['transaction']['payday'])
+													 ->first();
+			 
+			$balanco 					= new \App\Models\Balanco();
+			$balanco->contrato_id		= $contratoId;
+		
+			$balanco->parcela_id		= isset($parcela->id) ? $parcela->id : 0;
+			$balanco->nparcela			= isset($parcela->nparcela) ? $parcela->nparcela : 0;
+			$balanco->data_vencimento	= isset($parcela->data_vencimento) ? $parcela->data_vencimento : null;
+			$balanco->data_pagamento	= isset($parcela->data_pagamento) ? $parcela->data_pagamento : null;
+			$balanco->data_baixa		= isset($parcela->data_baixa) ? $parcela->data_baixa :  null;
+			$balanco->valor				= isset($parcela->valor)  ? $parcela->valor : 0;
+			$balanco->situacao			= isset($parcela->status) ? $parcela->status : "";
+			
+			if (!isset($parcela->id))
+			{
+				if ((isset($transacaoCorrespondente['transaction']['chargeMyId'])) and (substr_count($transacaoCorrespondente['transaction']['chargeMyId'], '#') == 2)) 
+				{
+					list($contrato_id_ts,$parcela_id_ts,$hash)        = explode("#",$transacaoCorrespondente['transaction']['chargeMyId']);
+					
+					if (($contrato_id_ts != $contratoId) or ($parcela_id_ts != $transacaoCorrespondente['transaction']['chargeGalaxPayId']))
+					{
+						$parcela 						= \App\Models\Parcela::select('id','galaxPayId','cgalaxPayId','nparcela','data_vencimento','data_pagamento','data_baixa','valor','status')
+														 ->where('contrato_id', '=', $contrato_id_ts)
+														 ->where('id','=',$parcela_id_ts)
+														 ->first();
+						if (isset($parcela->id))
+						{
+							$balanco->galaxPayId_ts		= $parcela->galaxPayId;
+							$balanco->cgalaxPayId_ts	= $parcela->cgalaxPayId;
+							$balanco->contrato_ts		= $contrato_id_ts;
+							$balanco->parcela_ts		= $parcela_id_ts;
+							$balanco->situacao_ts		= $parcela->status;
+						}
+					}
+				}
+			}
+			
+			$balanco->cpf				= $transacaoCorrespondente['customer']['document'] ?? "";
+			$balanco->galaxPayId		= $transacaoCorrespondente['transaction']['galaxPayId'] ?? 0;
+			$balanco->cgalaxPayId		= $transacaoCorrespondente['transaction']['chargeGalaxPayId'] ?? 0;
+			$balanco->payday			= $transacaoCorrespondente['transaction']['payday'] ?? null;
+			$balanco->paydayDate 		= isset($transacaoCorrespondente['transaction']['paydayDate']) ? $transacaoCorrespondente['transaction']['paydayDate'] : null;
+			$balanco->status			= $transacaoCorrespondente['transaction']['status'] ?? "";
+			$balanco->value				= $transacaoCorrespondente['transaction']['value'] ?? 0;
+			$balanco->tipo				= "TS";
+			$balanco->save();
+			
+			$data_baixa 				= null;
+			
+			if (($transacao['transaction']['status'] == 'cancel') and (Cas::temData($transacao['transaction']['statusDate'])))
+			{
+				$data_baixa			    =  substr($transacao['transaction']['statusDate'],0,10);
+			}
+				
+			$balance['transacoes_sem_parcela'][] = [
+				'galaxPayId' 			=> $transacao['transaction']['galaxPayId'] ?? null,
+				'mainPaymentMethodId' 	=> $transacao['transaction']['mainPaymentMethodId'] ?? null,
+				'payday' 				=> $transacao['transaction']['payday'] ?? null,
+				'paydayDate' 			=> $transacao['transaction']['paydayDate'] ?? null,
+				'installment'			=> $transacao['transaction']['installment'] ?? 0,
+				'data_baixa'			=> $data_baixa,
+				'value' 				=> $transacao['transaction']['value'] ?? null,
+				'status' 				=> $transacao['transaction']['status'] ?? null,
+				'parcela'				=> $parcela ?? '',
+				'response' 				=> $transacao,
+			];
+			$balance['estatisticas']['transacoes_sem_parcela']++;
+		}
+		
+		$contrato                               = \App\Models\Contrato::find($contratoId);
+		if (isset($contrato->id))
+		{
+			$contrato->balanco 					= 'S';
+			$contrato->save();
+		}
+		return $balance;
+	}
+	
+	public static function balancoContrato($contrato_id, $cpf)
+	{
+		
+		$query                       = "documents=" .  $cpf . "&startAt=0&limit=1";
+		$customer                    = CelCash::getCustomers($query);
+			
+		if (isset($customer->Customers[0]->galaxPayId))
+		{
+				
+			$resultado = CelCash::listarTransacoesPorData($customer->Customers[0]->galaxPayId, 100);
+
+			if ($resultado->statcode == 200) 
+			{
+				$dadosExtraidos 	= CelCash::extrairDadosTransacoes($resultado->response);
+				$balanco 			= CelCash::balancearDadosTransacoesParcelas($contrato_id, $dadosExtraidos);
+			}
+		}
+	}
+	
+}

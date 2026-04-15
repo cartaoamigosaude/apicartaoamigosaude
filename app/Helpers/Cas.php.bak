@@ -1,0 +1,4649 @@
+<?php
+
+namespace App\Helpers;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Hash;
+use Laravel\Passport\Client;
+use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
+use App\Helpers\CelCash;
+use App\Helpers\ChatHot;
+use App\Helpers\Epharma;
+use App\Jobs\ChatHotJob;
+use App\Jobs\CelCashParcelasAvulsaJob;
+use Carbon\Carbon;
+use PDF;
+use DB;
+use stdClass;
+
+class Cas
+{
+
+	public static function nulltoSpace($value)
+	{
+		if ((!isset($value)) || ($value == null))
+		{
+			return "";
+		}
+			
+		if (is_null($value) || ($value==null) || ($value=='null') || ($value=='undefined'))
+		{
+			return "";
+		}
+		
+		if (strpos($value, 'null'))
+		{
+			return "";
+		}
+		
+		return $value;
+	}
+	
+	public static function temData($value)
+	{
+	
+		if (substr_count($value, '-') > 0)
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+
+	public static function validarCpf($cpf) 
+	{
+		// Remove caracteres não numéricos
+		$cpf = preg_replace('/[^0-9]/', '', $cpf);
+		$cpf = str_pad($cpf, 11, "0", STR_PAD_LEFT);	
+		
+		// Verifica se o CPF tem 11 dígitos e não é uma sequência repetitiva (ex: 111.111.111-11)
+		if (strlen($cpf) != 11 || preg_match('/^(\d)\1{10}$/', $cpf)) {
+			return false;
+		}
+
+		// Calcula o primeiro dígito verificador
+		$soma = 0;
+		for ($i = 0; $i < 9; $i++) {
+			$soma += (int)$cpf[$i] * (10 - $i);
+		}
+		$resto = $soma % 11;
+		$digito1 = ($resto < 2) ? 0 : 11 - $resto;
+
+		// Verifica o primeiro dígito
+		if ((int)$cpf[9] !== $digito1) {
+			return false;
+		}
+
+		// Calcula o segundo dígito verificador
+		$soma = 0;
+		for ($i = 0; $i < 10; $i++) {
+			$soma += (int)$cpf[$i] * (11 - $i);
+		}
+		$resto = $soma % 11;
+		$digito2 = ($resto < 2) ? 0 : 11 - $resto;
+
+		// Verifica o segundo dígito
+		if ((int)$cpf[10] !== $digito2) {
+			return false;
+		}
+
+		return true;
+	}
+
+	public static function limparCpf($value)
+    {
+		$value 				= preg_replace('/\D/', '', $value);
+		$lixo 				= array(".", "-", "_", " ",",");
+		$value				= str_replace($lixo, "", $value);
+		return $value;
+	}
+	
+	public static function removerAcentosEMaiusculo($texto) {
+		// Substitui caracteres acentuados por equivalentes não acentuados
+		$textoSemAcentos = preg_replace(
+			[
+				'/[áàâãäå]/u', '/[ÁÀÂÃÄÅ]/u',
+				'/[éèêë]/u', '/[ÉÈÊË]/u',
+				'/[íìîï]/u', '/[ÍÌÎÏ]/u',
+				'/[óòôõöø]/u', '/[ÓÒÔÕÖØ]/u',
+				'/[úùûü]/u', '/[ÚÙÛÜ]/u',
+				'/[ç]/u', '/[Ç]/u',
+				'/[ñ]/u', '/[Ñ]/u'
+			],
+			[
+				'a', 'A',
+				'e', 'E',
+				'i', 'I',
+				'o', 'O',
+				'u', 'U',
+				'c', 'C',
+				'n', 'N'
+			],
+			$texto
+		);
+
+		// Converte a string para letras maiúsculas
+		return mb_strtoupper($textoSemAcentos, 'UTF-8');
+	}
+
+	public static function formatCnpjCpf($value)
+	{
+		$CPF_LENGTH = 11;
+		$cnpj_cpf = preg_replace("/\D/", '', $value);
+		
+		if (strlen($cnpj_cpf) === $CPF_LENGTH) {
+			return preg_replace("/(\d{3})(\d{3})(\d{3})(\d{2})/", "\$1.\$2.\$3-\$4", $cnpj_cpf);
+		} 
+		
+		return preg_replace("/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/", "\$1.\$2.\$3/\$4-\$5", $cnpj_cpf);
+	}
+
+	public static function formatarTelefone($value) 
+	{
+		$value 				= preg_replace("/\D/", '', $value);
+
+		if ($value == '')
+		{
+			return '';
+		}
+
+		$telefone 			 = '(';
+		$telefone 			.= substr($value,0, 2);
+		$telefone 			.= ') ';
+		if (strlen($value) == 10)
+		{
+			$telefone 		.= '9' . substr($value,2, 4);
+			$telefone 		.= '-';
+			$telefone 		.= substr($value,6,4);
+		} else
+		{
+			$telefone 		.= substr($value,2, 5);
+			$telefone 		.= '-';
+			$telefone 		.= substr($value,7,4);
+	
+		}
+		
+		return $telefone;
+	}
+	
+	public static function formatarCPFCNPJ($value,$tipo)
+    {
+		$value 				= preg_replace("/\D/", '', $value);
+		
+        if ($tipo === 'F') {
+            // Formatar CPF (000.000.000-00)
+            return preg_replace("/(\d{3})(\d{3})(\d{3})(\d{2})/", "$1.$2.$3-$4", $value);
+        } elseif ($tipo === 'J') {
+            // Formatar CNPJ (00.000.000/0000-00)
+            return preg_replace("/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/", "$1.$2.$3/$4-$5", $value);
+        }
+
+        // Se o tipo não for definido, retornar o valor original
+        return $value;
+    }
+
+	public static function getMessageValidTexto($message,$caracter="\n")
+	{
+		$mensagem											= "";
+		$quebra												= "";
+		if (is_object($message))
+		{
+			foreach ($message->toArray() as $key => $value) { 
+				$value[0]									= str_replace("validation.cpf_valido","CPF Inválido",$value[0]);
+				$mensagem									.= $quebra . $value[0];
+				$quebra										= $caracter;
+			}
+		} else {
+			$message										= str_replace("validation.cpf_valido","CPF Inválido",$message);
+			$mensagem										= utf8_encode($message);
+		}
+		
+		return $mensagem;
+	}
+
+	public static function obterEscopos($user)
+	{
+
+        if ($user->perfil_id == 1)
+        {
+            $sql                    		= "SELECT menus.rota, programas.nome as programa FROM menus JOIN programas ON menus.programa_id = programas.id";
+            $menus			       			= DB::connection('mysql')->select($sql);
+        
+            $permissoes 					= array();
+
+            $sql                          = "SELECT escopo as permissao, nome FROM opcoes";
+            $spermissoes			       = DB::connection('mysql')->select($sql);
+
+            foreach ($menus as $menu) 
+            {
+                foreach ($spermissoes as $permissao) {
+                    $menuClone              = clone $menu;
+                    $menuClone->permissao   = $permissao->permissao;
+					$menuClone->nome   		= $permissao->nome;
+                    $permissoes[]           = $menuClone;
+                }
+            }
+        } else {
+            $sql                          = "SELECT menus.rota, opcoes.escopo as permissao, opcoes.nome, programas.nome as programa
+                                                FROM menus 
+													JOIN perfil_menu_opcao 
+														ON menus.id = perfil_menu_opcao.menu_id 
+													JOIN programas 
+														ON menus.programa_id = programas.id 
+													JOIN opcoes 
+														ON perfil_menu_opcao.opcao_id = opcoes.id
+													WHERE perfil_menu_opcao.perfil_id = $user->perfil_id";
+            $permissoes			        	= DB::connection('mysql')->select($sql);
+        }     
+                                    
+        $escopos                    	= array(); 
+		$acessos 						= array();
+		
+        foreach ($permissoes as $permissao) 
+        {
+            $key            							= $permissao->permissao . "." . $permissao->programa;
+
+            if (!in_array($key, $escopos)) 
+            {
+                $escopos[] 								= $key;
+            }
+			
+			if (!isset($acessos[$permissao->rota])) 
+            {
+                $acessos[$permissao->rota] 				= ['menu'=> $permissao->rota,'operacoes' => []];
+            }
+			
+            $acessos[$permissao->rota]['operacoes'][] 	= ['botao' => $permissao->nome];
+   
+        }
+		
+		$acessos                = array_values($acessos);
+        /*
+		$escopos 					= array();
+		$escopos[]					= 'view.beneficiarios';
+        $escopos[]					= 'edit.beneficiarios';
+        $escopos[]					= 'delete.beneficiarios';
+        $escopos[]					= 'view.clientes';
+        $escopos[]					= 'edit.clientes';
+        $escopos[]					= 'delete.clientes';
+        $escopos[]					= 'view.contratos';
+        $escopos[]					= 'edit.contratos';
+        $escopos[]					= 'delete.contratos';
+		$escopos[]					= 'view.parcelas';
+        $escopos[]					= 'edit.parcelas';
+        $escopos[]					= 'delete.parcelas';
+        $escopos[]					= 'view.periodicidades';
+        $escopos[]					= 'edit.periodicidades';
+        $escopos[]					= 'delete.periodicidades';
+        $escopos[]					= 'view.planos';
+        $escopos[]					= 'edit.planos';
+        $escopos[]					= 'delete.planos';
+        $escopos[]					= 'view.situacoes';
+        $escopos[]					= 'edit.situacoes';
+        $escopos[]					= 'delete.situacoes';
+        $escopos[]					= 'view.vendedores';
+        $escopos[]					= 'edit.vendedores';
+        $escopos[]					= 'delete.vendedores';
+		$escopos[]					= 'view.produtos';
+        $escopos[]					= 'edit.produtos';
+        $escopos[]					= 'delete.produtos';
+		$escopos[]					= 'view.especialidades';
+        $escopos[]					= 'edit.especialidades';
+        $escopos[]					= 'delete.especialidades';
+		$escopos[]					= 'view.clinicas';
+        $escopos[]					= 'edit.clinicas';
+        $escopos[]					= 'delete.clinicas';
+		$escopos[]					= 'view.agendamentos';
+        $escopos[]					= 'edit.agendamentos';
+        $escopos[]					= 'delete.agendamentos';
+		$escopos[]					= 'view.usuarios';
+        $escopos[]					= 'edit.usuarios';
+        $escopos[]					= 'delete.usuarios';
+		$escopos[]					= 'view.menus';
+        $escopos[]					= 'edit.menus';
+        $escopos[]					= 'delete.menus';
+		$escopos[]					= 'view.permissoes';
+        $escopos[]					= 'edit.permissoes';
+        $escopos[]					= 'delete.permissoes';
+		*/
+		$retorno					= new stdClass();
+		$retorno->escopos 			= $escopos;
+		$retorno->acessos 			= $acessos;
+		
+		return $retorno;
+	}
+	
+	public static function oauthToken($login,$senha,$escopos)
+    {
+        $app_url                = env('APP_URL');
+		$app_url = config('app.url');
+		Log::info("app_url", ['app_url'	=> $app_url]);
+		Log::info("login", ['login'	=> $login]);
+		Log::info("senha", ['senha'	=> $senha]);
+		Log::info("escopos", ['escopos'	=> $escopos]);
+		 
+        $response               = Http::asForm()->post($app_url . '/oauth/token', [
+														'grant_type'    => 'password',
+														'client_id'     => config('app.passport_client_id'),
+														'client_secret' => config('app.passport_client_secret'),
+														'username'      => $login,
+														'password'      => $senha,
+														'scope'         => is_array($escopos) ? implode(' ', $escopos) : (string) $escopos,
+												 ]);
+            
+         $token                  = $response->json();
+
+		 //Log::info("token", ['token'	=> $token]);
+
+         return $token;
+    }
+	
+	public static function refreshToken($request)
+	{
+		$request->validate(['refresh_token' => 'required|string']);
+		$app_url                = env('APP_URL');
+		$response 				= Http::asForm()->post($app_url . '/oauth/token', [
+														'grant_type'        => 'refresh_token',
+														'refresh_token'     => $request->refresh_token,
+														'client_id'         => env('PASSPORT_CLIENT_ID'),
+														'client_secret'     => env('PASSPORT_CLIENT_SECRET'),
+														'scope'             => '',
+												]);
+
+		return $response->json();
+	}
+
+	public static function obterCombo($value,$id=0)
+	{
+		$tabelas					= array(); 	
+		if (!is_array($value))
+		{
+			if (strpos($value, ',') > 0)
+			{
+				$tabelas 			= explode(",", $value);
+			} else {
+				$tabelas[]			= $value;
+			}
+		} else {
+			$tabelas				= $value;
+		}
+
+		$combo               		= new stdClass;
+
+		foreach ($tabelas as $tabela)
+		{
+			switch ($tabela) 
+			{ 
+				case 'users':
+					$sql 						= "SELECT id, name as nome FROM users order by name";
+					$combo->users				= DB::select($sql);
+					break;
+				case 'situacoes':
+					$sql 						= "SELECT id, nome, cobranca FROM situacoes where ativo=1 order by nome";
+					$combo->situacoes			= DB::select($sql);
+					break;
+				case 'motivos':
+					$sql 						= "SELECT id, nome, ativo FROM motivos where ativo=1 order by nome";
+					$combo->motivos				= DB::select($sql);
+					break;
+				case 'asituacoes':
+					$sql 						= "SELECT id, nome, orientacao, whatsapp FROM asituacoes where ativo=1 order by nome";
+					$combo->asituacoes			= DB::select($sql);
+					break;
+				case 'cmotivos':
+					$sql 						= "SELECT id, nome  FROM agendamento_cmotivos order by ordem";
+					$combo->cmotivos			= DB::select($sql);
+					break;
+				case 'periodicidades':
+					$sql 						= "SELECT id, nome FROM periodicidades where ativo=1 order by nome";
+					$combo->periodicidades		= DB::select($sql);
+					break;
+				case 'vendedores':
+					if (($id > 0) and (!isset($vendedor)))
+					{
+						$vendedor				= Cas::obterIDVendedor($id);	
+					}
+					if ((isset($vendedor->vendedor_id)) and ($vendedor->vendedor_id > 0))
+					{
+						$sql 					= "SELECT id, nome FROM vendedores where id=" . $vendedor->vendedor_id . " order by nome";
+					} else {
+						$sql 					= "SELECT id, nome FROM vendedores where ativo=1 order by nome";
+					}
+					$combo->vendedores			= DB::select($sql);
+					$combo->sql 				= $sql;
+					break;
+				case 'planos':
+					if (($id > 0) and (!isset($vendedor)))
+					{
+						$vendedor				= Cas::obterIDVendedor($id);	
+					}
+					if ((isset($vendedor->planos)) and (count($vendedor->planos) > 0))
+					{
+						$sql 					= "SELECT id, nome, formapagamento, parcelas, preco FROM planos where id in(" . implode(",", $vendedor->planos) . ") and ativo=1 order by nome";
+					} else {
+						$sql 					= "SELECT id, nome, formapagamento, parcelas, preco FROM planos where ativo=1 order by nome";
+					}
+					$combo->planos				= DB::select($sql);
+					break;
+				case 'vplanos':
+					$sql 						= "SELECT id, nome, 0 as incluso FROM planos where ativo=1 and galaxPayId> 0 order by nome";
+					$combo->vplanos				= DB::select($sql);
+					break;
+				case 'produtos':
+					$sql 						= "SELECT id, nome FROM produtos where ativo=1 order by nome";
+					$combo->produtos			= DB::select($sql);
+					break;
+				case 'especialidades':
+					$sql 						= "SELECT id, nome FROM especialidades where ativo=1 order by nome";
+					$combo->especialidades		= DB::select($sql);
+					break;
+				case 'perfis':
+					$sql 						= "SELECT id, nome FROM perfis order by nome";
+					$combo->perfis				= DB::select($sql);
+					break;
+				case 'menus_pais':
+					$sql 						= "SELECT id, nome FROM menus WHERE programa_id IS NULL AND rota IS NULL ORDER BY ordem";
+					$combo->menus_pais			= DB::select($sql);
+					break;
+				case 'programas':
+					$sql 						= "SELECT id,nome FROM programas";
+					$combo->programas			= DB::select($sql);
+					break;
+				case 'parentescos':
+					$sql 						= "SELECT id,nome FROM parentescos order by nome";
+					$combo->parentescos			= DB::select($sql);
+					break;
+			}
+		}
+		return $combo;										
+	}
+	
+	public static function obterCep($cep)
+    {
+		
+		$retorno				= new stdClass();
+		$retorno->ok 			= "";
+		$retorno->lcep 			= $cep;
+		$retorno->endereco		= "";
+		$retorno->bairro		= "";
+		$retorno->cidade		= "";
+		$retorno->estado		= "";
+		
+		$lixo 					= array(".","-","_"," ",",");
+		$cep 					= preg_replace('/\D/', '', $cep);
+		$cep					= str_replace($lixo,"",$cep);
+		$cep					= str_pad($cep, 8, "0", STR_PAD_LEFT);
+		
+		if ($cep ==0)
+		{
+			$retorno->ok 		= "N";
+			$retorno->lcep 		= "";
+			return $retorno;	
+		}
+		
+		$endereco = null;
+		try {
+			$enderecoJson 		= file_get_contents("http://viacep.com.br/ws/$cep/json/");
+			if ($enderecoJson !== false) {
+				$endereco 		= json_decode($enderecoJson);
+			}
+		} catch (\Exception $e) {
+			// Em caso de erro, $endereco permanece null
+			$endereco = null;
+		}
+		  
+		if ($cep !== $retorno->lcep)
+		{
+			$retorno->lcep		= $cep;
+		} else {
+			$retorno->lcep		= "";
+		}
+		
+		// Verificar se $endereco é um objeto válido antes de acessar suas propriedades
+		if ($endereco && is_object($endereco)) {
+			if ((isset($endereco->logradouro)) and ($endereco->logradouro !=""))
+			{	
+				$retorno->endereco	= Cas::nulltoSpace($endereco->logradouro);
+			}
+			
+			if ((isset($endereco->bairro)) and ($endereco->bairro !=""))
+			{	
+				$retorno->bairro	= Cas::nulltoSpace($endereco->bairro);
+			}
+			
+			if ((isset($endereco->localidade)) and ($endereco->localidade !=""))
+			{	
+				$retorno->cidade	= Cas::nulltoSpace($endereco->localidade);
+			}
+			
+			if ((isset($endereco->uf)) and ($endereco->uf !=""))
+			{	
+				$retorno->estado	= Cas::nulltoSpace($endereco->uf);
+			}
+			
+			if ((isset($endereco->localidade)) and ($endereco->localidade !=""))
+			{
+				$retorno->ok 		= "S";
+			} else {
+				$retorno->ok 		= "N";
+			}
+		} else {
+			// Se $endereco é null ou inválido, definir como não encontrado
+			$retorno->ok 		= "N";
+		}
+		
+		return $retorno;
+	}
+
+	public static function montar_filtro($query, $payload)
+	{		
+		foreach ($payload->campos as $filtro)
+		{
+			$filtro									= (object) $filtro;
+			$condicoes								= (object) $filtro->condicoes;
+
+			foreach ($condicoes as $condicao)
+			{
+				$condicao							= (object) $condicao;
+
+				switch ($filtro->tipo) {
+					case "dec":
+						$condicao->conteudos[0]	    = str_replace(",",".",$condicao->conteudos[0]);
+						break;
+					case "cpfcnpj":
+						$condicao->conteudos[0]	    = preg_replace("/\D/", '', $condicao->conteudos[0]);
+						break;
+				}
+
+				switch ($condicao->condicao) {
+					case "equals":
+						if ($filtro->campo != 'beneficiario_produto.ativacao')
+						{
+							if ($condicao->conteudos[0] === null)
+							{
+								$query->whereNull($filtro->campo);
+							} else {
+								$conteudo                      = $condicao->conteudos[0];
+								$query->where($filtro->campo, '=' , "$conteudo");
+							}
+						}
+						break;
+					case "ranger":
+						if ($filtro->tipo == "data_hora")
+						{
+							$condicao->conteudos[0]	= ($condicao->conteudos[0] . ' 00:00:00');
+							$condicao->conteudos[1]	= ($condicao->conteudos[1] . ' 23:59:59');
+						}
+						$query->where($filtro->campo, '>=' , $condicao->conteudos[0])
+							  ->where($filtro->campo, '<=' , $condicao->conteudos[1]);
+						break;
+					case "in":
+						if (!empty($condicao->conteudos[0]) && is_array($condicao->conteudos[0])) {
+							$query->whereIn($filtro->campo, $condicao->conteudos[0]);
+						}
+						break;
+					case "contains":
+						$query->where($filtro->campo, 'like' , "%".$condicao->conteudos[0]."%" );
+						break;
+					case "lcontains":
+						$query->where($filtro->campo, 'like' ,$condicao->conteudos[0]."%" );
+						break;
+					case "gt":
+						if ($filtro->campo != 'parcelas.dias')
+						{
+							$query->where($filtro->campo, '>' ,$condicao->conteudos[0]);
+						} else {
+							$query->where('parcelas.data_vencimento', '<=' ,Carbon::now()->subDays($condicao->conteudos[0]));
+							$query->whereNull('parcelas.data_pagamento');
+							$query->whereNull('parcelas.data_baixa');
+						}
+						break;
+					case "lt":
+						$query->where($filtro->campo, '<=' ,$condicao->conteudos[0]);
+						break;
+					case "equalsNull":
+						$query->where($filtro->campo, '=',null);
+						break;
+					case "notEqualsNull":
+						$query->where($filtro->campo, '!=',null);
+						break;
+					case "notEquals":
+					    $conteudo                      = $condicao->conteudos[0];
+						$query->where($filtro->campo, '!=',"$conteudo");
+						break;
+					case "isNull":
+						$query->whereNull($filtro->campo);
+						break;
+					case "isNotNull":
+						$query->whereNotNull($filtro->campo);
+						break;
+					case "equalsColumn":
+						$query->whereColumn($filtro->campo, '=', $condicao->conteudos[0]);
+						break;
+					case "gtColumn":
+						$query->whereColumn($filtro->campo, '>', $condicao->conteudos[0]);
+						break;
+					case "ltColumn":
+						$query->whereColumn($filtro->campo, '<', $condicao->conteudos[0]);
+						break;
+					case "notEqualsColumn":
+						$query->whereColumn($filtro->campo, '!=', $condicao->conteudos[0]);
+						break;
+				}
+			}
+		};
+
+		return $query;
+	}
+		
+	public static function obterSituacaoContrato($status)
+	{
+		switch ($status) 
+		{
+			case "active":
+			case "waitingPayment":
+				return 'Ativo';
+			case "closed":
+				return 'Encerrado';
+			case "canceled":
+			case "stopped":
+				return 'Cancelado';
+			case "suspended":
+				return 'Suspenso';	
+			default:
+				return 'Registrado';
+		}
+
+		return $status;
+	}
+
+
+	public static function obterSituacaoParcela($data_vencimento,$data_pagamento,$data_baixa)
+    {
+		
+	    if ($data_pagamento!=null)
+	    {
+            return 'Paga';
+	    }
+
+        if ($data_baixa !=null)
+	    {
+            return 'Baixada';
+	    } 
+		  
+	  
+		if ($data_vencimento <= date('Y-m-d'))
+		{
+			return 'Vencida';  
+		}			  
+		
+	    return 'Á vencer';  
+    }	
+	
+	public static function podepagarParcela($situacao)	
+	{
+		if (($situacao == 'Vencida') or ($situacao == 'Á vencer'))
+		{
+			return 'S';
+		}
+		
+		return 'N';
+	}
+	
+	public static function podebaixarParcela($situacao, $galaxPayId)	
+	{
+		if (($situacao != 'Vencida') and ($situacao != 'Á vencer'))
+		{
+			return 'N';
+		}
+		
+		if ($galaxPayId > 0)
+		{
+			return 'N';
+		}
+
+		return 'S';
+	}
+	
+	public static function podeebaixaParcela($situacao,$parcela_id,$contrato_id)	
+	{
+		if ($situacao == 'Baixada')
+		{
+			if (\App\Models\Parcela::where('contrato_id','=',$contrato_id)->where('id','>',$parcela_id)->count() == 0)
+			{
+				return 'S';
+			}
+		}
+		return 'N';
+	}
+	
+	public static function podeepagarParcela($situacao,$parcela_id,$contrato_id)	
+	{
+		if ($situacao == 'Paga')
+		{
+			if (\App\Models\Parcela::where('contrato_id','=',$contrato_id)->where('id','>',$parcela_id)->count() == 0)
+			{
+				$parcela 									= \App\Models\Parcela::find($parcela_id);
+				if (isset($parcela->id) and ((Cas::nulltoSpace($parcela->statusDescription) == "") or ((Cas::nulltoSpace($parcela->statusDescription) == "Paga fora do sistema"))))
+				{
+					return 'S';
+				} 
+				return 'N';
+			}
+		}
+		return 'N';
+	}
+	
+	public static function podeinserirParcela($contrato_id)	
+	{
+		$parcela = \App\Models\Parcela::where('contrato_id','=',$contrato_id)
+									->orderBy('nparcela','desc')
+									->first();
+		
+		if (isset($parcela->id))
+		{
+			if (($parcela->data_pagamento != null) or ($parcela->data_baixa != null))
+			{
+				return 'S';
+			} else {
+				return 'N';
+			}
+		} else {
+			return 'S';
+		}			
+		
+	}
+
+	public static function podeexcluirParcela($contrato_id,$parcela_id,$data_pagamento,$data_baixa, $galaxPayId, $nparcela)
+    {
+		if ($data_pagamento != null)
+		{
+			return 'N';
+		}
+
+		if ($data_baixa != null)
+		{
+			return 'N';
+		}	
+		
+		if ($nparcela ==1)
+		{
+			return 'N';
+		}
+		
+		if ($galaxPayId > 0)
+		{
+			return 'N';
+		}
+
+		if (\App\Models\Parcela::where('contrato_id','=',$contrato_id)
+							   ->where('id','>',$parcela_id)
+							   ->count() == 1)
+		{
+			return 'N';
+		} 
+		
+		return 'S';
+		
+	}
+
+	public static function podenegociarParcela($situacao)	
+	{
+		if ($situacao != 'Vencida')
+		{
+			return 'N';
+		}
+		
+		return 'S';
+	}
+
+	public static function podeeditarParcela($situacao,$galaxPayId)	
+	{
+		if (($situacao == 'Paga') or ($situacao == 'Baixada'))
+		{
+			return 'N';
+		}
+		
+		if ($galaxPayId > 0)
+		{
+			return 'N';
+		}
+
+		return 'S';
+	}
+
+	public static function podeboletoParcela($situacao,$boletobankNumber)	
+	{
+		if (($situacao != 'Vencida') and ($situacao != 'Á vencer'))
+		{
+			return 'N';
+		}
+		
+		if ($boletobankNumber > 0)
+		{
+			return 'N';
+		}
+
+		return 'S';
+	}
+
+	public static function podeeboletoParcela($situacao,$boletobankNumber, $contrato_id)	
+	{
+		if (($situacao == 'Paga') or ($situacao == 'Baixada'))
+		{
+			return 'N';
+		}
+		
+		if ($boletobankNumber == 0)
+		{
+			return 'N';
+		}
+
+		$contrato 				= \App\Models\Contrato::find($contrato_id);
+		
+		if (!isset($contrato->id))
+		{
+			return 'N';
+		}
+		
+		if ($contrato->tipo == 'F')
+		{
+			if (is_null($contrato->contractacceptedAt))
+			{
+				return 'N';
+			}
+		}
+		
+		return 'S';
+	}
+
+	public static function podecancelCobranca($situacao, $galaxPayId)	
+	{
+		if (($situacao == 'Paga') or ($situacao == 'Baixada'))
+		{
+			return 'N';
+		}
+		
+		if ($galaxPayId == 0)
+		{
+			return 'N';
+		}
+
+		return 'S';
+	}
+
+	public static function podefaturaContrato($situacao)	
+	{
+		if (($situacao == 'active') or ($situacao == 'waitingPayment'))
+		{
+			return 'S';
+		}
+		
+		return 'N';
+	}
+	
+	public static function podeeditarContrato($situacao,$id=0)	
+	{
+		if ($situacao == '')
+		{
+			return 'S';
+		}
+		
+		if ($id > 0)
+		{
+			$parcela 				= \App\Models\Parcela::where('contrato_id','=',$id)
+														->where('boletobankNumber','>',0)
+														->first();
+			
+			if (isset($parcela->id))
+			{
+				return 'N';
+			} else {
+				return 'S';
+			}
+		}
+		
+		return 'N';
+	}
+	
+	public static function linkassinarContrato($situacao,$paymentLink)	
+	{
+		return $paymentLink;
+	}
+
+	public static function podecarneContrato($situacao,$contrato_id,$parcela_id=0)	
+	{
+		if ($situacao != 'active')
+		{
+			return 'N';
+		}
+		
+		//return 'S';
+		
+		if ($parcela_id > 0)
+		{
+			if (\App\Models\Parcela::where('contrato_id','=',$contrato_id)
+								   ->where('id','<>',$parcela_id)
+								   ->where('data_pagamento','=',null)
+								   ->where('data_baixa','=',null)
+								   ->where('galaxPayId','>',0)
+								   ->where('boletobankNumber','>',0)
+								   ->count() ==0)
+			{
+				return 'N';
+			} 
+		} else {
+			if (\App\Models\Parcela::where('contrato_id','=',$contrato_id)
+								   ->where('data_pagamento','=',null)
+								   ->where('data_baixa','=',null)
+								   ->where('galaxPayId','>',0)
+								   ->where('boletobankNumber','>',0)
+								   ->count() ==0)
+			{
+				return 'N';
+			} 
+		}
+		
+		return 'S';
+	}
+	
+	public static function ecartaoContrato($contrato_id)	
+	{
+		$contrato 					= \App\Models\Contrato::find($contrato_id);
+		
+		if (!isset($contrato->id))
+		{
+			return false;
+		} 	
+		
+		if ($contrato->mainPaymentMethodId == 'creditcard')
+		{
+			return true;
+		}
+		
+		return false;
+	}
+
+	public static function getStoreClienteBeneficiario($beneficiario)
+	{
+		
+		 $cpf                        	= str_replace(array('.','-','/'), '', $beneficiario->cpf);	 
+		 $cpf                   		= str_pad($cpf, 11, '0', STR_PAD_LEFT);
+		  
+		 $cliente                    	= \App\Models\Cliente::where('cpfcnpj','=',$cpf)
+															 ->where('tipo','=','F')
+															 ->first();
+
+		 if (!isset($cliente->id)) 
+		 {
+			 $cliente 					= new \App\Models\Cliente();
+			 $cliente->tipo 			= 'F';
+			 $cliente->cpfcnpj 			= $cpf;
+			 $cliente->nome 			= $beneficiario->nome;
+			 $cliente->sexo 			= 'M'; //$beneficiario->sexo;
+			 $cliente->data_nascimento	= $beneficiario->data_nascimento;
+			 $cliente->telefone			= "";
+			 $cliente->email			= "";
+			 $cliente->cep				= "";
+			 $cliente->logradouro		= "";
+			 $cliente->numero			= "";
+			 $cliente->complemento		= "";
+			 $cliente->bairro			= "";
+			 $cliente->cidade			= "";
+			 $cliente->estado			= "";
+			 $cliente->galaxPayId		= 0;
+			 $cliente->ativo			= true;
+			 $cliente->observacao		= "";
+			 $cliente->save();
+		 }
+		 
+		return $cliente;
+	}
+	
+	public static function storeClienteTitular($titular)
+	{
+		
+		$cep 							= $titular->CEP;
+        $endereco               		= Cas::obterCep($cep);
+		
+		$cpf                        	= str_replace(array('.','-','/'), '', $titular->CPF);	 
+		$cpf                   			= str_pad($cpf, 11, '0', STR_PAD_LEFT);
+		  
+		$cliente                    	= \App\Models\Cliente::where('cpfcnpj','=',$cpf)->first();
+															 
+		if (!isset($cliente->id))
+		{
+			$cliente            		= new \App\Models\Cliente();
+			$cliente->cpfcnpj 			= $cpf;
+			$cliente->ativo 			= true;
+		}
+		
+		list($dia,$mes,$ano) 			= explode("/", $titular->NASCIMENTO);
+		$cliente->tipo					= 'F';
+		$cliente->nome					= $titular->NOME;
+		$cliente->data_nascimento		= "$ano-$mes-$dia";
+		$cliente->telefone				= $titular->TELEFONE;
+		$cliente->sexo					= $titular->SEXO;
+		$cliente->email					= $titular->EMAIL;
+		$cliente->cep					= $titular->CEP;
+		$cliente->estado				= $titular->ESTADO;
+		$cliente->cidade				= $titular->CIDADE;
+		$cliente->bairro				= $titular->BAIRRO;
+		$cliente->complemento			= $titular->COMPLEMENTO;
+		$cliente->logradouro			= $titular->LOGRADOURO;
+		$cliente->numero				= $titular->NUMERO;
+		
+		if ($endereco->ok == 'S')
+		{
+			if (($titular->ESTADO== "") and ($endereco->estado !=""))
+			{
+				$cliente->estado		= $titular->ESTADO;
+			}
+			if (($titular->CIDADE == "") and ($endereco->cidade !=""))
+			{
+				$cliente->cidade		= $titular->CIDADE;
+			}
+			if (($titular->BAIRRO == "") and ($endereco->bairro !=""))
+			{
+				$cliente->bairro		= $titular->BAIRRO;
+			}
+			if (($titular->LOGRADOURO == "") and ($endereco->endereco !=""))
+			{
+				$cliente->logradouro	= $titular->LOGRADOURO;
+			}
+		}
+		$cliente->save();
+		return $cliente;
+	}
+
+	public static function storeUpdateCliente($request)
+	{
+		$cpfcnpj									= preg_replace('/\D/', '', $request->cpfcnpj);
+		$cpfcnpj 									= str_pad($cpfcnpj, 11, '0', STR_PAD_LEFT);
+		$achou 										= false;
+		
+		if ((isset($request->cliente_id)) and ($request->cliente_id > 0))
+		{
+			$cliente               					= \App\Models\Cliente::find($request->cliente_id);
+			
+			if (isset($cliente->id))
+			{
+				$ccpfcnpj							= preg_replace('/\D/', '', $cliente->cpfcnpj);
+				
+				if ($ccpfcnpj == $cpfcnpj)
+				{
+					$achou 							= true;
+				}
+			}
+		} 
+		
+		if (!$achou)
+		{
+			$cliente               					= \App\Models\Cliente::where('cpfcnpj','=',$cpfcnpj)->first();
+			
+			if (isset($cliente->id))
+			{
+				$achou 								= true;
+			}
+		}
+		
+		if (!$achou)
+		{
+			$cliente            					= new \App\Models\Cliente();
+			$cliente->cpfcnpj 						= $cpfcnpj;
+			$cliente->ativo 						= true;
+		}
+		
+		if ($request->tipo == 'F')
+		{
+			$cliente->sexo							= $request->sexo;
+			$cliente->data_nascimento				= $request->data_nascimento;
+		} 
+		
+		$cliente->tipo								= $request->tipo;
+        $cliente->nome								= $request->nome;
+        $cliente->telefone							= $request->telefone;
+		if ((!isset($request->email)) or ($request->email == "") or (is_null($request->email)))
+		{
+        	$request->email							= 'sememail@cartaoamigosaude.com.br';
+		}
+		$cliente->email 							= $request->email;
+        $cliente->cep								= $request->cep;
+        $cliente->logradouro						= $request->logradouro;
+        $cliente->numero							= $request->numero;
+        $cliente->complemento						= $request->complemento;
+        $cliente->bairro							= $request->bairro;
+        $cliente->cidade							= $request->cidade;
+        $cliente->estado							= $request->estado;
+		
+		if ($cliente->save())
+		{
+			 //$ccliente                            	= CelCash::storeCliente($cliente->id);
+		}
+		
+		return $cliente;
+	}
+
+	public static function storeClienteTitularLote($beneficiarios)
+	{
+		$beneficiariosProcessados				= array();
+		
+		foreach ($beneficiarios as $index => $beneficiarioData) 
+		{
+			$retorno 								= $beneficiarioData;
+			$titular 								= (object) $beneficiarioData;
+			$cpf 									= str_replace(array('.','-','/'), '', $titular->CPF);	 
+			$cpf 									= str_pad($cpf, 11, '0', STR_PAD_LEFT);
+			
+			$cliente                    			= \App\Models\Cliente::where('cpfcnpj','=',$cpf)->first();
+															 
+			if (!isset($cliente->id))
+			{
+				$cliente            				= new \App\Models\Cliente();
+				$cliente->cpfcnpj 					= $cpf;
+			} 
+			
+			list($dia,$mes,$ano) 				= explode("/", $titular->NASCIMENTO);
+			$cliente->tipo						= 'F';
+			$cliente->nome						= $titular->NOME;
+			$cliente->data_nascimento			= "$ano-$mes-$dia";
+			$cliente->telefone					= $titular->TELEFONE;
+			$cliente->sexo						= $titular->SEXO;
+			$cliente->email						= $titular->EMAIL;
+			$cliente->cep						= $titular->CEP;
+			$cliente->estado					= $titular->ESTADO;
+			$cliente->cidade					= $titular->CIDADE;
+			$cliente->bairro					= $titular->BAIRRO;
+			$cliente->complemento				= $titular->COMPLEMENTO;
+			$cliente->logradouro				= $titular->LOGRADOURO;
+			$cliente->numero					= $titular->NUMERO;
+			$cliente->ativo 					= true;
+			if ($cliente->save())
+			{
+				$retorno['cliente_id'] 			= $cliente->id; 	
+			} else {
+				$retorno['erro'] 				= 'Não foi criado ou atualizado o cliente';
+				$retorno['cliente_id']  		= 0;
+			}					
+			$beneficiariosProcessados[]			= $retorno;
+		}
+		
+		return $beneficiariosProcessados;
+		
+	}
+	
+	public static function situacaoAgendamento($value)
+	{
+		/*
+		solicitado_data_hora
+		agendar_data_hora 
+		preconfirmado_data_hora
+		confirmado_data_hora
+		cancelado_data_hora
+		pagamento_data_hora
+		*/
+		
+		switch ($value) 
+		{
+			case "S": return "Solicitado";
+			/* necessário atualizar solicitacao_data_hora */
+			case "R": return "Pré-agendado";
+			/* 	preconfirmado_data_hora */ 
+			case "A": return "Aguard confirmacao/Pagto";	
+			/* necessário atualizar solicitacao_data_hora */
+			case "C": return "Confirmado";
+			case "Y": return "Não pagou";			  
+			case "X": return "Cancelado";
+			case "N": return "Não compareceu";
+			case "G": return "Reagendado";
+			case "Z": return "Concluído";			  
+		}
+		return $value;	
+	}
+	
+	public static function permiteProdutoBeneficio($beneficiario_id,$produto_id)
+	{
+		
+		$retorno 									= new stdClass();
+        $retorno->ok                    			= "N";
+		
+		$beneficiario                              	= \App\Models\Beneficiario::with('contrato')->find($beneficiario_id);
+
+        if (!isset($beneficiario->id))
+        {
+			$retorno->mensagem 						= 'Não encontrado o beneficiario, permissão';
+			return $retorno;
+		}
+		
+		$tipo										= $beneficiario->tipo;
+		
+		if ($beneficiario->contrato->tipo == 'F')
+		{
+			 $plano_id              				= $beneficiario->contrato->plano_id;
+		} else {
+			if ($beneficiario->tipo == 'D')
+			{
+				$beneficiario                       = \App\Models\Beneficiario::where('id','=',$beneficiario->parent_id)->first();
+				if (!isset($beneficiario->id))
+				{
+					$retorno->mensagem 				= 'Não encontrado o titular ou beneficiario, permissão';
+					return $retorno;
+				}
+			}
+			$plano_id              					= $beneficiario->plano_id;
+		}
+				
+		$planoproduto  								= \App\Models\PlanoProduto::where('plano_id','=',$plano_id)
+																			  ->where('produto_id','=',$produto_id)
+																			  ->whereIn('beneficiario',array('A',$tipo))
+																			  ->first();
+		if (!isset($planoproduto->id))
+		{
+			//$retorno->mensagem 						= "Produto " . $produto_id . " não autorizado para o tipo de beneficiário " . $beneficiario->tipo . ' no plano ' . $plano_id ;
+			$retorno->mensagem 						= "Beneficio não autorizado para o tipo de beneficiário.";
+			return $retorno;
+		}
+		
+		$retorno->ok                    			= "S";
+		return $retorno;
+	}
+
+	public static function beneficiarioProduto($beneficiario_id,$produto_id)
+	{
+		$contrato_id 								= 0;
+		$contrato_tipo								= "";
+		$tipo										= "";
+		$plano_id 									= 0;
+		
+		$beneficiario 								= \App\Models\Beneficiario::with('contrato')->find($beneficiario_id);
+		
+		if (isset($beneficiario->id))
+		{
+			$contrato_id							= $beneficiario->contrato->id;
+			$contrato_tipo 							= $beneficiario->contrato->tipo;
+			
+			$tipo									= $beneficiario->tipo;
+			if ($beneficiario->contrato->tipo == 'F')
+			{
+				$plano_id              				= $beneficiario->contrato->plano_id;
+			} else {
+				if ($tipo == 'T')
+				{
+					$plano_id              			= $beneficiario->plano_id;
+				} else {
+					$beneficiario 					= \App\Models\Beneficiario::find($beneficiario->parent_id);
+		
+					if (isset($beneficiario->id))
+					{
+						$plano_id          			= $beneficiario->plano_id;;
+					}
+				}
+			}		
+		}
+		
+		if ($plano_id > 0)
+		{
+			$permitido  							= \App\Models\PlanoProduto::where('produto_id','=',$produto_id)
+																			  ->where('plano_id','=',$plano_id)
+																			  ->whereIn('beneficiario',array('A',$tipo))
+																			  ->first();
+																			  
+			if (isset($permitido->id))
+			{
+				return true;
+			}
+		}
+		
+		return false;
+	}
+	
+	public static function planoBeneficiarioTipo($beneficiario_id,$ativar=0)
+	{
+		
+		$retorno 									= new stdClass();
+		$retorno->plano_id 							= 0;
+		$retorno->tipo 								= "";
+		$retorno->dependentes 						= array();
+		
+		$contrato_id 								= 0;
+		$contrato_tipo								= "";
+		
+		$beneficiario 								= \App\Models\Beneficiario::with('contrato')->find($beneficiario_id);
+		
+		if (isset($beneficiario->id))
+		{
+			$contrato_id							= $beneficiario->contrato->id;
+			$contrato_tipo 							= $beneficiario->contrato->tipo;
+			
+			$retorno->tipo							= $beneficiario->tipo;
+			if ($beneficiario->contrato->tipo == 'F')
+			{
+				$retorno->plano_id              	= $beneficiario->contrato->plano_id;
+			} else {
+				if ($beneficiario->tipo == 'T')
+				{
+					$retorno->plano_id              = $beneficiario->plano_id;
+				} else {
+					$beneficiario 					= \App\Models\Beneficiario::find($beneficiario->parent_id);
+		
+					if (isset($beneficiario->id))
+					{
+						$retorno->plano_id          = $beneficiario->plano_id;;
+					}
+				}
+			}		
+		}
+		
+		if (($retorno->tipo == 'T') and ($retorno->plano_id > 0))
+		{
+			if ($contrato_tipo == 'F')
+			{	
+				$retorno->dependentes 				= \App\Models\Beneficiario::with('cliente')
+																			  ->where('contrato_id','=',$contrato_id)
+																			  ->where('tipo','=','D')
+																			  ->where('ativo','=',$ativar)
+																			  ->get();
+			} else {
+				$retorno->dependentes 				= \App\Models\Beneficiario::with('cliente')
+																			  ->where('parent_id','=',$beneficiario_id)
+																			  ->where('tipo','=','D')
+																			  ->where('ativo','=',$ativar)
+																			  ->get();
+			}
+		}
+		
+		return $retorno;
+	}
+	
+	public static function ativarDesativarBeneficiario($beneficiario_id,$ativar)
+	{
+		$ativadesativa										= array();
+		
+		$planotipo 											= Cas::planoBeneficiarioTipo($beneficiario_id,$ativar);
+		
+		if ($planotipo->plano_id > 0)
+		{
+			$produtos 										= Cas::obterBeneficios($planotipo->plano_id,$planotipo->tipo, $beneficiario_id);
+			if (count($produtos) > 0)
+			{
+				$payload 									= new stdClass();
+				$payload->beneficiario_id					= $beneficiario_id;
+				$payload->ativar 							= $ativar;
+				$payload->produtos 							= $produtos;
+				$ativardesativar							= $payload;
+				$ativardesativar->produtos					= Cas::ativarDesativarProdutos($payload);
+				$ativadesativa[]							= $ativardesativar;
+				if ($planotipo->tipo == 'T')
+				{
+					if (count($planotipo->dependentes) > 0)
+					{
+						foreach ($planotipo->dependentes as $dependente)
+						{
+							$produtos 						= Cas::obterBeneficios($planotipo->plano_id,'D', $dependente->id);
+							if (count($produtos) > 0)
+							{
+								$payload 					= new stdClass();
+								$payload->beneficiario_id	= $beneficiario_id;
+								$payload->ativar 			= $ativar;
+								$payload->produtos 			= $produtos;
+								$ativardesativar			= $payload;
+								$ativardesativar->produtos	= Cas::ativarDesativarProdutos($payload);
+								$ativadesativa[]			= $ativardesativar;
+							}
+						}
+					}
+				}
+			}
+		}
+		
+		return $ativadesativa;
+	}
+	
+	public static function ativarDesativarProdutos($payload)
+	{
+		$produtos 									= array();
+		
+		foreach ($payload->produtos as $produto)
+		{
+			if (!is_object($produto)) 
+			{
+				$produto 							= (object) $produto;
+			}
+			
+			switch ($produto->id) 
+			{
+				case 1: /* Desconto em Consultas & Exames */
+					break;
+				case 2: /* Clube Certo*/
+					$associate 						= ClubeCerto::ativarDesativarBeneficiario($payload->beneficiario_id,$produto->id,$payload->ativar);
+					if ($associate->ok =='S')
+					{
+						$produto->ok				= 'S';
+						$produto->ativacao			= $associate->ativacao;
+						$produto->data_ativacao		= $associate->data_ativacao;
+						$produto->data_desativacao	= $associate->data_desativacao;
+			
+						if ($payload->ativar)
+						{
+							$produto->ativacao		= 'Sim';
+							$produto->mensagem 		= 'Ativado com sucesso!';
+						} else {
+							$produto->ativacao		= 'Não';
+							$produto->mensagem 		= 'Desativado com sucesso!';
+						}
+					} else {
+						$produto->ok				= 'N';
+						$produto->mensagem 			= $associate->mensagem;
+					}
+					break;
+				case 3: /* Epharma*/
+					$associate 						= Epharma::ativarDesativarBeneficiario($payload->beneficiario_id,$produto->id,$payload->ativar);
+					if ($associate->ok =='S')
+					{
+						$produto->ok				= 'S';
+						$produto->ativacao			= $associate->ativacao;
+						$produto->data_ativacao		= $associate->data_ativacao;
+						$produto->data_desativacao	= $associate->data_desativacao;
+			
+						if ($payload->ativar)
+						{
+							$produto->ativacao		= 'Sim';
+							$produto->mensagem 		= 'Ativado com sucesso!';
+						} else {
+							$produto->ativacao		= 'Não';
+							$produto->mensagem 		= 'Desativado com sucesso!';
+						}
+					} else {
+						$produto->ok				= 'N';
+						$produto->mensagem 			= $associate->mensagem;
+					}
+					break;
+				case 4: /* Telemedicina (Conexa)*/
+					$associate 						= Conexa::ativarDesativarBeneficiario($payload->beneficiario_id,$produto->id,$payload->ativar);
+					if ($associate->ok =='S')
+					{
+						$produto->ok				= 'S';
+						$produto->ativacao			= $associate->ativacao;
+						$produto->data_ativacao		= $associate->data_ativacao;
+						$produto->data_desativacao	= $associate->data_desativacao;
+			
+						if ($payload->ativar)
+						{
+							$produto->ativacao		= 'Sim';
+							$produto->mensagem 		= 'Ativado com sucesso!';
+						} else {
+							$produto->ativacao		= 'Não';
+							$produto->mensagem 		= 'Desativado com sucesso!';
+						}
+					} else {
+						$produto->ok				= 'N';
+						$produto->mensagem 			= $associate->mensagem;
+					}
+					break;
+				case 5: /* Seguro funeral*/
+					break;
+			}
+			$produtos[]								= $produto;
+		}
+
+		return $produtos;
+	}
+	
+	public static function ativarDesativarProduto($beneficiario_id,$produto_id,$ativar=true,$id="")
+	{
+		$retorno 										= new stdClass();
+        $retorno->ok                    				= "N";
+		$retorno->ativacao								= false;
+		$retorno->data_ativacao							= date("Y-m-d H:i:s");
+		$retorno->data_desativacao						= date("Y-m-d H:i:s");
+		
+		$beneficiarioproduto  							= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario_id)
+																						 ->where('produto_id','=',$produto_id)
+																						 ->first();														 
+		if (!$ativar)
+		{
+			if (isset($beneficiarioproduto))
+			{
+				$beneficiarioproduto->ativacao			= $retorno->ativacao;
+				$beneficiarioproduto->data_desativacao	= $retorno->data_desativacao;
+				$beneficiarioproduto->idintegracao		= $id;
+				$beneficiarioproduto->data_fim 			= date("Y-m-d");
+				if ($beneficiarioproduto->save())
+				{
+					 $retorno->ok                    	= "S";
+				} else {
+					 $retorno->ok                    	= "N";
+					 $retorno->mensagem 				= "Ocorreu problema na tentativa de desativar na base";
+				}
+			} else {
+				 $retorno->ok                    		= "S";
+			}
+			
+		} else {
+			if (!isset($beneficiarioproduto))
+			{
+				$beneficiarioproduto 					= new \App\Models\BeneficiarioProduto();
+				$beneficiarioproduto->beneficiario_id	= $beneficiario_id;
+				$beneficiarioproduto->produto_id		= $produto_id;
+			}
+			$beneficiarioproduto->idintegracao			= $id;
+			$beneficiarioproduto->ativacao				= true;
+			$beneficiarioproduto->data_ativacao			= $retorno->data_ativacao;
+			$beneficiarioproduto->data_desativacao		= null;
+			$beneficiarioproduto->data_inicio 			= date("Y-m-d");
+			$beneficiarioproduto->data_fim 				= '2999-12-31';
+			if ($beneficiarioproduto->save())
+			{
+				$retorno->ok                    		= "S";
+			} else {
+				$retorno->ok                    		= "N";
+				$retorno->mensagem 						= "Ocorreu problema na tentativa de ativar na base";
+			}
+			$retorno->ativacao							= true;
+			$retorno->data_desativacao					= null;
+		}
+		
+		return $retorno;
+	}
+	
+	public static function gerarLinkMagico($beneficiario_id,$produto_id,$ip)
+	{
+		$retorno               						= new stdClass;
+		$retorno->ok								= 'N';
+		$retorno->link								= "";
+		
+		$cbeneficiario                   			= \App\Models\Beneficiario::with('contrato')->find($beneficiario_id);
+				
+		if (!isset($cbeneficiario->id))
+		{
+			$plano_id								= 0;
+		} else {
+			$tipo                          			= $cbeneficiario->contrato->tipo ?? 'F';
+			if ($tipo == 'F')
+			{
+				$plano_id 							= $cbeneficiario->contrato->plano_id ?? 0;
+			} else {
+				if ($cbeneficiario->tipo == 'T')
+				{
+					$plano_id 						= $cbeneficiario->plano_id;
+				} else {
+					$dbeneficiario                  = \App\Models\Beneficiario::where('id','=',$cbeneficiario->parent_id)->first();
+					if (isset($dbeneficiario->id))
+					{	
+						$plano_id 					= $dbeneficiario->plano_id;
+					} else {
+						$plano_id					= 0;
+					}
+				}
+			}
+		}
+			
+		$beneficiarioproduto  						= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario_id)
+																					 ->where('produto_id','=',$produto_id)
+																					 ->first();														 
+		if ((!isset($beneficiarioproduto->id)) or ($beneficiarioproduto->ativacao==0))
+		{
+			$retorno->ok							= 'N';
+			$retorno->mensagem						= "É necessário ativar o produto antes";
+			return $retorno;
+		}
+		
+		switch ($produto_id)
+		{
+			case 1:  /* desconto consultas e examens*/ 		
+				break;
+			case 2:  /* Clube de desconto */
+				$beneficiario  						= \App\Models\Beneficiario::with('cliente')->find($beneficiario_id);							 
+				if (!isset($beneficiario->id))
+				{
+					$retorno->ok					= 'N';
+					$retorno->mensagem				= "Beneficiário não encontrato";
+					return $retorno;
+				}
+			    $retorno->ok						= 'S';
+				$cpf 								= preg_replace('/\D/', '',$beneficiario->cliente->cpfcnpj);
+			    $retorno->link 						= "https://app.clubecerto.com.br/?cpf=" . $cpf . "&showHeader=false&showFooter=false";
+			    $beneficiarioproduto->magiclink		= $retorno->link;
+				$retorno->linkweb                   = $retorno->link;
+			    $beneficiarioproduto->save();
+			    return $retorno;
+			case 3:  /* desconto em farmacias */
+			   break;
+			case 4:  /* Telemedicina*/
+			
+			    /* verificar se já existe o aceite de termo*/
+				 
+				$termo								= Conexa::termAccept($beneficiarioproduto->idintegracao, $plano_id);
+				
+				if (($termo->ok == 'S') and (!$termo->object)) 
+				{
+					Log::info('termonao', ['termonao'	=> $termo]);
+					//Log::info('termo', ['termo'	=> $termo]);
+					$tpayload               		= new stdClass;
+					$tpayload->idPatient			= $beneficiarioproduto->idintegracao;
+					$tpayload->ip					= $ip;
+					$tpayload->plano_id 			= $plano_id;
+					$acceptterm						= Conexa::acceptTerm($tpayload);
+				}
+				
+				Log::info('termo', ['termo'	=> $termo]);
+				
+				$magiclink 							= Conexa::generateMagicLinkAccessapp($beneficiarioproduto->idintegracao,$plano_id);
+				
+				if (($magiclink->ok == 'N') and (($magiclink->details == 'Não foi registrado o termo do paciente.') or ($magiclink->mensagem == 'Não foi registrado o termo do paciente.')))
+				{
+				
+					$payload               			= new stdClass;
+					$payload->idPatient				= $beneficiarioproduto->idintegracao;
+					$payload->ip					= $ip;
+					$payload->plano_id 				= $plano_id;
+					$acceptterm						= Conexa::acceptTerm($payload);
+					
+					Log::info('acceptterm', ['acceptterm'	=> $acceptterm]);
+					if ($acceptterm->ok =='S')
+					{
+						$magiclink 					= Conexa::generateMagicLinkAccessapp($beneficiarioproduto->idintegracao, $plano_id);
+					} else {
+						$retorno->ok				= 'N';
+						$retorno->mensagem			= $acceptterm->mensagem;
+						return $retorno;
+					}						
+				}
+				
+				if (($magiclink->ok == 'N') and ($magiclink->details == 'Paciente bloqueado.'))
+				{
+					$activate 						= Conexa::desbloquear($beneficiarioproduto->idintegracao, $plano_id);
+					Log::info('activate', ['activate'	=> $activate]);
+					if ($activate->ok == 'S')
+					{
+						$payload               		= new stdClass;
+						$payload->idPatient			= $beneficiarioproduto->idintegracao;
+						$payload->ip				= $ip;
+						$payload->plano_id 			= $plano_id;
+						$acceptterm					= Conexa::acceptTerm($payload);
+						Log::info('acceptterm', ['acceptterm'	=> $acceptterm]);
+						$magiclink 					= Conexa::generateMagicLinkAccessapp($beneficiarioproduto->idintegracao, $plano_id);
+					} else {
+						$retorno->ok				= 'N';
+						$retorno->mensagem			= $acceptterm->mensagem;
+						return $retorno;
+					}						
+				}
+				
+				if (($magiclink->ok == 'N') or (!isset($magiclink->object)))
+				{
+					$retorno->ok					= 'N';
+					$retorno->mensagem				= $magiclink->mensagem;
+					return $retorno;
+				}
+				if (!isset($magiclink->object->linkMagicoApp))
+				{
+					$retorno->ok					= 'N';
+					$retorno->mensagem				= "O Link não foi gerado, favor entrar em contato com o suporte";
+					return $retorno;
+				}
+				$retorno->ok						= 'S';
+				$beneficiarioproduto->magiclink		= $magiclink->object->linkMagicoApp;
+			    $beneficiarioproduto->save();
+				$retorno->link						= $beneficiarioproduto->magiclink;
+				$retorno->linkweb                   = $magiclink->object->linkMagicoWeb;
+			    return $retorno;
+			case 5:  /* Seguro funeral*/
+			  break;
+		}
+		
+		$retorno->ok								= 'N';
+		$retorno->mensagem							= "Link ainda não implementado";
+		return $retorno;
+		
+	}
+	
+	public static function obterPlanoBeneficios($beneficiario_id)
+	{
+		$plano               						= new stdClass;
+		$plano->id									= 0;
+		$plano->nome								= "";
+		$plano->produtos 							= array();
+		
+		$beneficiario                              	= \App\Models\Beneficiario::with('contrato')->find($beneficiario_id);
+
+        if (!isset($beneficiario->id))
+        {
+			$plano->produtos 						= array();
+			return $plano;
+		}
+		
+		$tipo										= $beneficiario->tipo;
+		if ($beneficiario->contrato->tipo == 'F')
+		{
+			 $plano              					= \App\Models\Plano::select('id','nome','preco','qtde_beneficiarios')->find($beneficiario->contrato->plano_id);
+		} else {
+			if ($beneficiario->tipo == 'D')
+			{
+				$beneficiario                       = \App\Models\Beneficiario::with('contrato')->where('id','=',$beneficiario->parent_id)->first();
+				if (!isset($beneficiario->id))
+				{
+					$plano->produtos 				= array();
+					return $plano;
+				}
+			}
+			$plano              					= \App\Models\Plano::select('id','nome','preco','qtde_beneficiarios')->find($beneficiario->plano_id);
+		}
+				
+				
+		if (!isset($plano->id))
+		{
+			$plano               					= new stdClass;
+			$plano->id								= 0;
+			$plano->nome							= "";
+			$plano->produtos 						= array();
+			return $plano;
+		}
+		if ($beneficiario->contrato->status == 'active')
+		{
+			$plano->produtos 						= Cas::obterBeneficios($plano->id,$tipo,$beneficiario_id);
+		} else {
+			$plano->produtos 						= array();
+		}
+		return $plano;
+	}
+	
+	public static function obterBeneficios($plano_id,$tipo_beneficiario,$beneficiario_id)
+	{
+		$produtos 											= array();
+		
+		$planoprodutos   									= \App\Models\PlanoProduto::with('produto')
+																	 ->where('plano_id','=',$plano_id)
+																	 ->whereIn('beneficiario',array('A',$tipo_beneficiario))
+																	 ->get();
+		foreach ($planoprodutos as $planoproduto)
+		{
+			if ($planoproduto->produto->integracao)
+			{
+				$beneficiarioproduto 						= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario_id)
+																							 ->where('produto_id','=',$planoproduto->produto->id)
+																							 ->first();
+				if (!isset($beneficiarioproduto->id))
+				{
+					$planoproduto->produto->integrado 		= 0;
+					$planoproduto->produto->ativacao 		= 'Não';
+					$planoproduto->produto->data_ativacao   = null;
+					$planoproduto->produto->data_desativacao= null;
+				} else {
+					$planoproduto->produto->integrado 		= 1;
+					if ($beneficiarioproduto->ativacao ==1)
+					{
+						$planoproduto->produto->ativacao 	= 'Sim';
+					} else {
+						$planoproduto->produto->ativacao 	= 'Não';
+					}
+					$planoproduto->produto->data_ativacao   = $beneficiarioproduto->data_ativacao;
+					$planoproduto->produto->data_desativacao= $beneficiarioproduto->data_desativacao;
+				}
+			} 
+			$produtos[]						= $planoproduto->produto;
+		}	
+
+		return $produtos;
+	}
+	
+	public static function limparCacheMenu()
+    {
+		$sql 					= "SELECT id FROM menus where id > 0";
+		$menus					= DB::connection('mysql')->select($sql);
+
+		foreach ($menus as $menu)
+		{
+			\Cache::forget("buscar_menu_pai:{$menu->id}");
+		}
+	}
+	
+	public static function buscarParentId($id)
+	{
+		DB::statement('SET SESSION cte_max_recursion_depth = 1000000');
+
+        $chave_cache 				= "buscar_parent_id:{$id}";	
+
+		$menus 						= \Cache::remember($chave_cache, now()->addDays(1), function () use ($id) 
+		{
+			return DB::connection('mysql')
+						->table(DB::raw("(WITH RECURSIVE menu_cte AS (
+											SELECT 
+												id, 
+												parent_id, 
+												nome, 
+												rota,
+												ordem,
+												programa_id
+											FROM menus
+											WHERE id = '$id'
+											UNION ALL
+											SELECT 
+												u.id, 
+												u.parent_id, 
+												u.nome,
+												u.rota,
+												u.ordem,
+												u.programa_id
+											FROM menus u
+											INNER JOIN menu_cte cte ON cte.parent_id = u.id
+										) 
+										SELECT * FROM menu_cte) as menu_cte"
+							))
+						->select(
+							'menu_cte.id',
+							'menu_cte.parent_id',
+							'menu_cte.nome',
+							'menu_cte.rota',
+							'menu_cte.id as key',
+							'menu_cte.ordem',
+							'menu_cte.programa_id',
+						)
+						->get();
+		});
+	
+        return $menus;
+	}
+	
+	public static function verificadorPermissoes($menu_id, $perfil_id, $opcao_id = 0) 
+	{
+		$sql 			= "SELECT count(*) as qnt FROM perfil_menu_opcao WHERE menu_id = $menu_id AND perfil_id = $perfil_id AND opcao_id = $opcao_id";
+		$permissao		= DB::connection('mysql')->select($sql);
+
+		if (!isset($permissao[0]->qnt))
+		{
+			return 0;
+		}
+	
+		return $permissao[0]->qnt;
+	}
+
+	public static function obterIdPermissaoListar() 
+	{
+		$sql 				= "SELECT id FROM opcoes WHERE escopo = 'view'";
+		$permissao			= DB::connection('mysql')->select($sql);
+
+		if (!isset($permissao[0]->id))
+		{
+			return 0;
+		}
+	
+		return $permissao[0]->id;
+	}
+
+	public static function obterFilhasMenu($parent_id) 
+	{
+		$menus				= array();
+
+		$sql 				= "WITH RECURSIVE menu_cte AS (
+									SELECT 
+										menu_id, 
+										parent_id
+									FROM menus
+									WHERE parent_id = $parent_id
+									UNION ALL
+									SELECT 
+										u.menu_id, 
+										u.parent_id
+									FROM menus u
+									INNER JOIN menu_cte cte ON cte.menu_id = u.parent_id
+								)
+								SELECT menu_id
+								FROM menu_cte";
+		$filhos				= DB::connection('mysql')->select($sql);
+
+		if (isset($filhos[0]->menu_id))
+		{
+			$menus 			= array_column($filhos, 'menu_id');
+		}
+		
+		$menus[]			= $parent_id;
+
+		return $menus;
+	}
+
+	public static function inserirListarMenu($menu_id, $perfil_id, $opcao_id)
+	{
+		$id_listar 			= Cas::obterIdPermissaoListar();
+
+		if (($id_listar == 0) or ($id_listar == $opcao_id))
+		{
+			return false;
+		}
+
+		$sql 				= "SELECT count(*) as qnt FROM perfil_menu_opcao WHERE menu_id 	= '$menu_id' AND perfil_id = '$perfil_id' AND opcao_id  = '$id_listar'";
+		$count				= DB::connection('mysql')->select($sql);
+
+		if ((!isset($count[0]->qnt)) or ($count[0]->qnt > 0))
+		{
+			return false;
+		}
+
+		$insert 			= DB::connection('mysql')
+									->table('perfil_menu_opcao')
+									->insert([
+											'menu_id'   => $menu_id,
+											'nivel_id'  => $perfil_id,
+											'opcao_id' 	=> $id_listar,
+											'pode' 		   => 1,
+										]);
+	}
+	
+	public static function exportCsv($payload, $beneficiarios)
+	{
+		$data 						= [];
+
+		// Determina a ação com base no payload
+		$acao 						= ($payload->ativarbloquear == 'A') ? 'I' : 'A';
+
+		$colunas 								= [];
+		$colunas[]                  			= "Tipo de Registro (FIXO)";	
+		$colunas[]                      		= "Acao";	
+		$colunas[]                      		= "Codigo do Beneficio";	
+		$colunas[]                      		= "Carteira Beneficiario Titular";	
+		$colunas[]                      		= "Carteira Beneficiario ou dependente";	
+		$colunas[]                      		= "Nome Completo";	
+		$colunas[]                      		= "Nome Cartao"	;
+		$colunas[]                      		= "Data de Nascimento";	
+		$colunas[]                      		= "Sexo";	
+		$colunas[]                      		= "Numero do Documento"	;
+		$colunas[]                      		= "Orgao Emissor";	
+		$colunas[]                      		= "Numero CPF";
+		$colunas[]                      		= "Endereco";	
+		$colunas[]                      		= "Numero";	
+		$colunas[]                      		= "Complemento"	;
+		$colunas[]                      		= "Bairro";
+		$colunas[]                      		= "Cidade";	
+		$colunas[]                      		= "Estado";	
+		$colunas[]                      		= "CEP"	;
+		$colunas[]                      		= "Inicio de Vigencia";	
+		$colunas[]                      		= "Termino de Vigencia";
+		$colunas[]                      		= "Codigo Processamento";	
+		$colunas[]                      		= "Matricula";	
+		$colunas[]                      		= "Filler";	
+		$colunas[]                      		= "Numero de Registro";
+		$data[]                     			= $colunas;
+		$registro 								= 0;
+
+		foreach ($beneficiarios as $beneficiario) {
+			
+			$registro ++;
+
+			$colunas 				= [];
+			$colunas[] 				= '01'; // Código fixo
+			$colunas[] 				= $acao; // Ação
+			$colunas[] 				= '244926'; // Código fixo
+
+			$cpf_dependente = $beneficiario->cpfcnpj;
+			$cpf_titular = "";
+
+			// Determina o CPF do titular
+			if ($beneficiario->tipo == 'T') 
+			{
+				$cpf_titular 		= $beneficiario->cpfcnpj;
+			} else {
+				if ($beneficiario->tipo_contrato == 'F') {
+					$titular = DB::connection('mysql')
+						->table('beneficiarios')
+						->select('clientes.cpfcnpj')
+						->join('clientes', 'beneficiarios.cliente_id', '=', 'clientes.id')
+						->where('beneficiarios.contrato_id', '=', $beneficiario->contrato_id)
+						->where('beneficiarios.tipo', '=', 'T')
+						->first();
+
+					if (isset($titular->cpfcnpj)) {
+						$cpf_titular = $titular->cpfcnpj;
+					}
+				} else {
+					$titular = DB::connection('mysql')
+						->table('beneficiarios')
+						->select('clientes.cpfcnpj')
+						->join('clientes', 'beneficiarios.cliente_id', '=', 'clientes.id')
+						->where('beneficiarios.contrato_id', '=', $beneficiario->contrato_id)
+						->where('beneficiarios.id', '=', $beneficiario->parent_id)
+						->first();
+
+					if (isset($titular->cpfcnpj)) {
+						$cpf_titular = $titular->cpfcnpj;
+					}
+				}
+			}
+
+			$cpf_titular		= preg_replace("/\D/", '', $cpf_titular);
+			$cpf_dependente		= preg_replace("/\D/", '', $cpf_dependente);
+			
+			$cpf_titular		= str_pad($cpf_titular, 11, "0", STR_PAD_LEFT);
+			$cpf_dependente		= str_pad($cpf_dependente, 11, "0", STR_PAD_LEFT);
+
+			$colunas[] 			= $cpf_titular;
+			$colunas[] 			= $cpf_dependente;
+			$colunas[] 			= trim(Cas::removerAcentosEMaiusculo($beneficiario->cliente));
+			$colunas[] 			= trim(Cas::removerAcentosEMaiusculo($beneficiario->cliente));
+
+			// Formata a data de nascimento
+			list($ano, $mes, $dia) = explode("-", $beneficiario->data_nascimento);
+			$colunas[] 			= "$dia/$mes/$ano";
+
+			$colunas[] 			= $beneficiario->sexo;
+			$colunas 			= array_merge($colunas, array_fill(0, 2, "")); // Campos adicionais vazios
+			$colunas[] 			= $cpf_dependente;
+			$colunas 			= array_merge($colunas, array_fill(0, 7, "")); // Campos adicionais vazios
+
+			if ($acao == 'I') {
+				$colunas[] 		= date('d/m/Y'); // Data de inclusão
+				$colunas[] 		= ""; // Data de alteração vazia
+			} else {
+				$colunas[] 		= ""; // Data de inclusão vazia
+				$colunas[] 		= date('d/m/Y'); // Data de alteração
+			}
+
+			$colunas[] 			= "2"; // Código fixo
+			$colunas[] 			= $cpf_dependente;
+			$colunas[] 			= ""; // Campo vazio
+			$colunas[] 			= str_pad($registro, 6, '0', STR_PAD_LEFT); // Código fixo
+
+			$data[] 			= $colunas; // Adiciona a linha ao array de dados
+			
+			if ($beneficiario->tipo == 'T') 
+			{
+				foreach ($beneficiario->expansoes as $dependente) 
+				{
+					$registro ++;
+
+					$colunas 			= [];
+					$colunas[] 			= '01'; // Código fixo
+					$colunas[] 			= $acao; // Ação
+					$colunas[] 			= '244926'; // Código fixo
+					
+					$cpf_dependente		= preg_replace("/\D/", '', $dependente->cpfcnpj);
+					$cpf_dependente		= str_pad($cpf_dependente, 11, "0", STR_PAD_LEFT);
+
+					$colunas[] 			= $cpf_titular;
+					$colunas[] 			= $cpf_dependente;
+					$colunas[] 			= trim(Cas::removerAcentosEMaiusculo($dependente->cliente));
+					$colunas[] 			= trim(Cas::removerAcentosEMaiusculo($dependente->cliente));
+
+					// Formata a data de nascimento
+					list($ano, $mes, $dia) = explode("-", $dependente->data_nascimento);
+					$colunas[] 			= "$dia/$mes/$ano";
+
+					$colunas[] 			= $dependente->sexo;
+					$colunas 			= array_merge($colunas, array_fill(0, 2, "")); // Campos adicionais vazios
+					$colunas[] 			= $cpf_dependente;
+					$colunas 			= array_merge($colunas, array_fill(0, 7, "")); // Campos adicionais vazios
+
+					if ($acao == 'I') {
+						$colunas[] 		= date('d/m/Y'); // Data de inclusão
+						$colunas[] 		= ""; // Data de alteração vazia
+					} else {
+						$colunas[] 		= ""; // Data de inclusão vazia
+						$colunas[] 		= date('d/m/Y'); // Data de alteração
+					}
+
+					$colunas[] 			= "2"; // Código fixo
+					$colunas[] 			= $cpf_dependente;
+					$colunas[] 			= ""; // Campo vazio
+					$colunas[] 			= str_pad($registro, 6, '0', STR_PAD_LEFT); // Código fixo
+					$data[] 			= $colunas; // Adiciona a linha ao array de dados
+				}
+			}
+		}
+
+		$colunas 								= [];
+		$colunas[]                  			= "99";	
+		$colunas[]                      		= $registro;
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "";	
+		$colunas[]                      		= "000001";
+		$data[]                     			= $colunas;
+		
+		// Configura o nome do arquivo
+		$filename = 'dados_exportados.csv';
+
+		// Gera o arquivo CSV e envia para o download
+		$response = new StreamedResponse(function () use ($data) {
+			$handle = fopen('php://output', 'w');
+
+			// Adiciona os dados no arquivo CSV com separador ";"
+			foreach ($data as $row) {
+				fputcsv($handle, $row, ';');
+			}
+
+			fclose($handle);
+		});
+
+		$response->headers->set('Content-Type', 'text/csv; charset=UTF-8');
+		$response->headers->set('Content-Disposition', "attachment; filename=\"$filename\"");
+
+		return $response;
+	}
+	
+	public static function isValidEmail($email)
+	{
+		return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+	}
+
+	public static function ativarBeneficiarioContratosValidos()
+	{
+		$ativar									= array();
+		$contratosValidos 						= \App\Models\Contrato::whereIn('status', ['active', 'waitingPayment']) // Contratos ativos ou aguardando pagamento
+																	 ->where('tipo', '=', 'F') // Tipo do contrato é 'F'
+																	 ->where(function ($query) {
+																			$query->whereDoesntHave('parcelas') // Contratos sem parcelas
+																				->orWhere(function ($query) {
+																					$query->whereHas('parcelas', function ($subQuery) {
+																						$subQuery->where('data_vencimento', '>=', Carbon::now()) // Parcelas a vencer
+																								 ->whereNull('data_pagamento'); // Parcelas não pagas
+																					})
+																					->whereDoesntHave('parcelas', function ($subQuery) {
+																						$subQuery->where('data_vencimento', '<', Carbon::now()) // Parcelas vencidas
+																								 ->whereNull('data_pagamento'); // Parcelas não pagas
+																					});
+																				});
+																		})
+																		->get();
+		if (count($contratosValidos) > 0)
+		{
+			foreach ($contratosValidos as $contrato)
+			{
+				$beneficiarios 					= \App\Models\Beneficiario::where('contrato_id','=',$contrato->id)
+																		  ->where('tipo','=','T')
+																		  ->get();	
+				foreach ($beneficiarios as $beneficiario)	
+				{
+					$beneficiarioproduto  		= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario->id)
+																				 ->whereIn('produto_id',array(2,4))
+																				 ->where('ativacao','=',1)
+																				 ->count();														 
+					if ($beneficiarioproduto < 2)
+					{					
+						$ativar[]               = $contrato->id; //Cas::ativarDesativarBeneficiario($beneficiario->id,true);
+					}
+				}
+			}
+		}
+		
+		return $ativar;
+	}
+	
+	public static function inativarBeneficiarioComParcelasVencidas($dias=9)
+	{
+
+		$desativar									= array();
+		// Data limite: 9 dias atrás
+		$dataLimite 								= Carbon::now()->subDays($dias);
+
+		// Subconsulta para obter a menor data de vencimento por contrato
+		$subQuery 									= \App\Models\Parcela::selectRaw('MIN(data_vencimento) as menor_vencimento, contrato_id')
+															->whereNull('data_pagamento') // Pagamento é nulo
+															->where('data_vencimento', '<', $dataLimite) // Vencimento há mais de 9 dias
+															->groupBy('contrato_id'); // Agrupar por contrato
+
+		// Consulta principal para obter os detalhes da parcela
+		$parcelasvencidas 							= \App\Models\Parcela::joinSub($subQuery, 'sub', function ($join) {
+																		$join->on('parcelas.contrato_id', '=', 'sub.contrato_id')
+																			->on('parcelas.data_vencimento', '=', 'sub.menor_vencimento');
+																	})
+																	->whereHas('contrato', function ($query) {
+																		$query->whereIn('status', array('active','waitingPayment')); // Contratos com situação ativa
+																		$query->where('tipo','=','F');
+																	})
+																	->get();
+
+		if (count($parcelasvencidas) > 0)
+		{
+			foreach ($parcelasvencidas as $parcela)
+			{
+				$beneficiarios 						= \App\Models\Beneficiario::where('contrato_id','=',$parcela->contrato_id)
+																			  ->where('tipo','=','T')
+																			  ->get();	
+				foreach ($beneficiarios as $beneficiario)	
+				{														  
+					$desativar[]                    = Cas::ativarDesativarBeneficiario($beneficiario->id,false);
+				}
+			}
+		}
+
+		return $desativar;
+	}
+	
+	public static function cancelar_preagendamentos_expirados($hours=24)
+	{
+		
+		$timeLimit 								= Carbon::now()->subHours($hours)->format('Y-m-d H:i:s');
+		$preagendamentos 						= DB::table('clinica_beneficiario')
+													->where('asituacao_id', '=',2)
+													->where('preagendamento_data_hora', '<', $timeLimit)
+													->get();
+													
+		foreach ($preagendamentos as $preagendamento)
+		{
+			 $agendamento                       	= \App\Models\ClinicaBeneficiario::find($preagendamento->id);
+			 if (isset($agendamento->id))
+			 {
+				 $agendamento->asituacao_id     	= 8;
+				 $agendamento->cmotivo_id			= 1;
+				 $agendamento->cancelado_data_hora	= date('Y-m-d H:i:s');
+				 $agendamento->cancelado_por 		= 1;
+				 $agendamento->save();
+			 }
+		}
+		
+		return $preagendamentos;
+	}
+
+	public static function obterQuemFez($id)
+	{
+		
+		$sql 										= "SELECT id, name as nome FROM users where id=$id";
+		$users										= DB::select($sql);
+		
+		if ((isset($users[0]->nome)) and ($users[0]->nome !=""))
+		{
+			return $users[0]->nome;
+		}
+		
+		return '';
+		
+	}
+		
+	public static function substituirMensagemAgendamento($agendamento_id,$mensagem)
+	{
+		
+		$retorno               						= new stdClass;
+		$retorno->mensagem							= $mensagem;
+		$retorno->arquivo 							= "";
+		$arquivo 									= "";
+		
+		$agendamento            			    	= \App\Models\ClinicaBeneficiario::with('clinica','especialidade','beneficiario')->find($agendamento_id);
+		
+		if (!isset($agendamento->id))
+        {
+			return $retorno;
+		}
+		
+		if (substr_count($mensagem, '[tipo]') > 0)
+		{
+			if ($agendamento->tipo == 'C')
+			{
+				$tipo 								= 'Consulta';
+			} else {
+				$tipo 								= 'Exame';
+			}
+			$mensagem								= str_replace("[tipo]",$tipo,$mensagem);
+		}
+		
+		if (substr_count($mensagem, '[especialidade]') > 0)
+		{
+			$mensagem								= str_replace("[especialidade]",$agendamento->especialidade->nome,$mensagem);
+		}
+		
+		if (substr_count($mensagem, '[data_hora]') > 0)
+		{
+			if (!is_null($agendamento->agendamento_data_hora))
+			{
+				$data 								= substr($agendamento->agendamento_data_hora,0,10);
+				list($ano,$mes,$dia) 				= explode("-",$data);
+				$data_hora							= "$dia/$mes/$ano" . ' ás ' . substr($agendamento->agendamento_data_hora,11,5);
+				$mensagem							= str_replace("[data_hora]",$data_hora,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[vencimento]') > 0)
+		{
+			if (!is_null($agendamento->vencimento))
+			{
+				list($ano,$mes,$dia) 				= explode("-",$agendamento->vencimento);
+				$vencimento							= "$dia/$mes/$ano";
+				$mensagem							= str_replace("[vencimento]",$vencimento,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[pagamento]') > 0)
+		{
+			if (!is_null($agendamento->pagamento))
+			{
+				list($ano,$mes,$dia) 				= explode("-",$agendamento->pagamento);
+				$pagamento							= "$dia/$mes/$ano";
+				$mensagem							= str_replace("[pagamento]",$pagamento,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[clinica]') > 0)
+		{
+			if (isset($agendamento->clinica->nome))
+			{
+				$mensagem							= str_replace("[clinica]",$agendamento->clinica->nome,$mensagem);
+			}
+		}
+		
+		
+		if (substr_count($mensagem, '[beneficiario]') > 0)
+		{
+			$beneficiario              				= \App\Models\Beneficiario::with('cliente')->find($agendamento->beneficiario_id);
+			if (isset($beneficiario->id))
+			{
+				$mensagem							= str_replace("[beneficiario]",$beneficiario->cliente->nome,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[clinicaendereco]') > 0)
+		{
+			if (isset($agendamento->clinica->nome))
+			{
+				$clinicaendereco 					= $agendamento->clinica->nome;
+				$clinicaendereco 					.= "\nCEP: ";
+				$clinicaendereco 					.= $agendamento->clinica->cep;
+				$clinicaendereco 					.= "\nEndereço: ";
+				$clinicaendereco 					.= $agendamento->clinica->logradouro . ", " . $agendamento->clinica->numero . " " . Cas::nulltoSpace($agendamento->clinica->complemento);
+				$clinicaendereco 					.= "\n" .  $agendamento->clinica->bairro . " | " . $agendamento->clinica->cidade . " | " . $agendamento->clinica->estado;
+				$mensagem							= str_replace("[clinicaendereco]",$clinicaendereco,$mensagem);
+			}
+			
+		}
+		
+		if (substr_count($mensagem, '[endereco]') > 0)
+		{
+			if (isset($agendamento->clinica->nome))
+			{
+				$endereco 							 = "\nCEP: ".  $agendamento->clinica->cep;
+				$endereco 							.= "\nEndereço: ";
+				$endereco 							.= $agendamento->clinica->logradouro . ", " . $agendamento->clinica->numero . " " . Cas::nulltoSpace($agendamento->clinica->complemento);
+				$endereco 							.= "\n" .  $agendamento->clinica->bairro . " | " . $agendamento->clinica->cidade . " | " . $agendamento->clinica->estado;
+				$mensagem							 = str_replace("[endereco]",$endereco,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[telefone]') > 0)
+		{
+			if (isset($agendamento->clinica->nome))
+			{
+				$mensagem							= str_replace("[telefone]",$agendamento->clinica->telefone,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[valor]') > 0)
+		{
+			$valor 									= "R$ ". str_replace(".",",",$agendamento->valor);
+			$mensagem								= str_replace("[valor]",$valor,$mensagem);
+		}
+		
+		if (substr_count($mensagem, '[pix]') > 0)
+		{
+			if (Cas::nulltoSpace($agendamento->pixpage) !="")
+			{
+				$mensagem							= str_replace("[pix]",$agendamento->pixpage,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[pixqrcode]') > 0)
+		{
+			if (Cas::nulltoSpace($agendamento->pixqrCode) !="")
+			{
+				$mensagem							= str_replace("[pixqrcode]",$agendamento->pixqrCode,$mensagem);
+			}
+		}
+		
+		if (substr_count($mensagem, '[link_voucher]') > 0)
+		{
+			if (Cas::nulltoSpace($agendamento->url_voucher) !="")
+			{
+				$mensagem							= str_replace("[link_voucher]",$agendamento->url_voucher,$mensagem);
+				$arquivo							= $agendamento->url_voucher;
+			}
+		}
+		
+		if (substr_count($mensagem, '[link_pagamento]') > 0)
+		{
+			if ($agendamento->boletobankNumber > 0)
+			{
+				$mensagem							= str_replace("[link_pagamento]",$agendamento->boletopdf,$mensagem);
+				$arquivo							= $agendamento->boletopdf;
+			} else {
+				if (Cas::nulltoSpace($agendamento->paymentLink) !="")
+				{
+					$mensagem						= str_replace("[link_pagamento]",$agendamento->paymentLink,$mensagem);
+				}
+			}
+		}
+		
+		$retorno->mensagem							= $mensagem;
+		$retorno->arquivo 							= $arquivo;
+		
+		return $retorno;
+		
+	}
+	
+	public static function harmonizarMensagemAgendamento($agendamento_id,$mensagem,$tipo="")
+	{
+		if ((substr_count($mensagem, '[tipo]') > 0) or
+		    (substr_count($mensagem, '[especialidade]') > 0) or
+			(substr_count($mensagem, '[beneficiario]') > 0) or
+		    (substr_count($mensagem, '[data_hora]') > 0) or
+		    (substr_count($mensagem, '[clinicaendereco]') > 0) or
+			(substr_count($mensagem, '[clinica]') > 0) or
+			(substr_count($mensagem, '[endereco]') > 0) or
+			(substr_count($mensagem, '[telefone]') > 0) or
+		    (substr_count($mensagem, '[vencimento]') > 0) or
+		    (substr_count($mensagem, '[pagamento]') > 0) or
+			(substr_count($mensagem, '[valor]') > 0) or
+			(substr_count($mensagem, '[pix]') > 0) or
+			(substr_count($mensagem, '[pixqrcode]') > 0) or
+		    (substr_count($mensagem, '[link_voucher]') > 0) or
+		    (substr_count($mensagem, '[link_pagamento]') > 0))
+		{
+			$mensagem							= Cas::substituirMensagemAgendamento($agendamento_id,$mensagem);
+		}
+		
+		return $mensagem;
+	}
+	
+	public static function enviarMensagemAgendamento($agendamento_id,$beneficiario_id,$numero,$mensagem,$enviado_por,$token='5519998557120')
+	{
+		if ($mensagem !="")
+		{
+			
+			$payload               				= new stdClass;
+			$payload->beneficiario_id 			= $beneficiario_id;
+			$payload->numero					= preg_replace('/\D/', '', $numero);
+			$harmonizar							= Cas::harmonizarMensagemAgendamento($agendamento_id,$mensagem);
+			if (isset($harmonizar->mensagem))
+			{
+				$payload->mensagem				= $harmonizar->mensagem;
+				$payload->arquivo				= $harmonizar->arquivo;
+			} else {
+				$payload->mensagem				= $harmonizar;
+				$payload->arquivo				= "";
+			}
+			$payload->enviado_por 				= $enviado_por;
+			$payload->token 					= $token;
+			Cas::chatHotJob($payload);
+		}
+	}
+	
+	public static function chatHotJob($payload)
+	{
+		ChatHotJob::dispatch($payload)->onQueue('chat');
+	}
+	
+	public static function chatHotMensagem($payload)
+	{
+		
+		if (substr($payload->numero, 0, 2) !== '55') 
+		{
+			$payload->numero						= '55' . $payload->numero;
+		}
+		
+		$envio 										= ChatHot::enviarMensagemChatHot($payload->numero, $payload->mensagem, $payload->token);
+		
+		if ($envio->ok =='S') 
+		{
+			if (isset($payload->beneficiario_id))
+			{
+				$whatsapp 							= new \App\Models\WhatsappMensagem();
+				$whatsapp->beneficiario_id 			= $payload->beneficiario_id;
+				$whatsapp->mensagem 				= $payload->mensagem;
+				$whatsapp->token 					= $payload->token;
+				$whatsapp->enviado_por 				= $payload->enviado_por;
+				$whatsapp->arquivo					= $payload->arquivo ?? "";
+				$whatsapp->statcode					= $envio->statcode;
+				$whatsapp->save();
+			}
+			if ($payload->arquivo !="")
+			{
+				$envio 								= ChatHot::enviarArquivoChatHot($payload->numero, $payload->arquivo, $payload->token);
+			}
+		} else {
+			$whatsapp 								= new \App\Models\WhatsappMensagem();
+			$whatsapp->beneficiario_id 				= $payload->beneficiario_id;
+			$whatsapp->mensagem 					= $payload->mensagem;
+			$whatsapp->token 						= $payload->token;
+			$whatsapp->arquivo						= $payload->arquivo ?? "";
+			$whatsapp->enviado_por 					= $payload->enviado_por;
+			if (isset($envio->statcode))
+			{
+				$whatsapp->statcode					= $envio->statcode;
+			} else {
+				$whatsapp->statcode					= 400;
+			}
+			$whatsapp->save();
+		}
+		
+		return $envio;
+	}
+	
+	public static function gerarContratoPDF($id,$ip)
+	{
+		$contrato 				                    = \App\Models\Contrato::with('plano')->find($id);
+        $paragrafos									= array();
+        
+        if (isset($contrato->id))
+        {		
+			$paragrafos 							= Cas::formatarContratoParaPDF(Cas::formatarTextoContrato($contrato->plano->clausulas,$contrato->id));
+		}
+		
+		if (count($paragrafos) > 0)
+		{
+			 $data = [
+				'paragrafos' 	=> $paragrafos,
+				'dataHora' 		=> date('d/m/Y H:m:s'),
+				'ip' 			=> $ip
+			];
+	
+			$foldername								= '/uploads/contratos/' . $contrato->id . Str::random(10) .'.pdf';
+			$destinationpath 						= public_path()  . $foldername;
+			$url        							= url("/") . $foldername;
+
+			$directoryPath 							= public_path('/uploads/contratos'); 
+			if (!is_dir($directoryPath)) 
+			{
+				mkdir($directoryPath, 0755, true);
+			}
+			
+			$pdf 									= PDF::loadView('contratopdf', $data)->save($destinationpath);
+			$contrato->status 						= 'active';	
+			$contrato->contractpdf 					= $url;
+			$contrato->contractacceptedAt			= date('Y-m-d H:m:s');
+			if ($contrato->save())
+			{
+				CelCashParcelasAvulsaJob::dispatch($contrato->id)->onQueue('default');
+			}
+			/*
+			Assinado digitalmente por:
+			Nome: EDILAINE IZABEL FERREIRA
+			CPF: 352.878.208-01
+			Data/Hora de aceitação: 23/07/2024 - 13:16
+			IP: 45.160.2.75
+			*/
+			return true;
+		}
+		
+		return false;
+	}
+		
+	public static function gerarVoucherPDF($id)
+	{
+		$agendamento            			    = \App\Models\ClinicaBeneficiario::with('clinica','especialidade')->find($id);
+		
+		if (isset($agendamento->id))
+        {
+			$beneficiario              			= \App\Models\Beneficiario::with('cliente')->find($agendamento->beneficiario_id);
+			if (isset($beneficiario->id))
+			{
+				$foldername						= '/uploads/voucher/' . $agendamento->id . Str::random(10) .'.pdf';
+				$destinationpath 				= public_path()  . $foldername;
+				$url        					= url("/") . $foldername;
+
+				$directoryPath 					= public_path('/uploads/voucher'); 
+				if (!is_dir($directoryPath)) 
+				{
+					mkdir($directoryPath, 0755, true);
+				}
+				
+				$voucher                        = new stdClass();
+				$voucher->numero_voucher		= 'VCH-' . str_pad($agendamento->id, 6, '0', STR_PAD_LEFT);
+				$voucher->paciente				= $beneficiario->cliente->nome;
+				list($ano,$mes,$dia) 			= explode("-",$beneficiario->cliente->data_nascimento);
+				$voucher->data_nascimento		= $dia . "/" . $mes . "/" . $ano;
+				$voucher->especialidade			= $agendamento->especialidade->nome;
+				$voucher->clinica				= $agendamento->clinica->nome;
+				
+				$clinicaendereco 				= "CEP: " . $agendamento->clinica->cep . " | ";
+				$clinicaendereco 				.= $agendamento->clinica->logradouro . ", " . $agendamento->clinica->numero;
+
+				if (!empty(Cas::nulltoSpace($agendamento->clinica->complemento))) {
+					$clinicaendereco 			.= " - " . $agendamento->clinica->complemento;
+				}
+
+				$clinicaendereco 				.= " - " . $agendamento->clinica->bairro;
+				$clinicaendereco 				.= " | " . $agendamento->clinica->cidade . " - " . $agendamento->clinica->estado;
+
+				$voucher->endereco				= $clinicaendereco;
+				$voucher->telefone				= $agendamento->clinica->telefone;
+				
+				$data 							= substr($agendamento->agendamento_data_hora,0,10);
+				list($ano,$mes,$dia) 			= explode("-",$data);
+				$data_hora						= $dia . "/" . $mes . "/" . $ano . ' ás ' . substr($agendamento->agendamento_data_hora,11,5);
+				
+				if ($agendamento->valor > 0)
+				{
+					$voucher->valor 			= "R$ ". str_replace(".",",",$agendamento->valor);
+				} else {
+					$voucher->valor				= "";
+				}
+		
+				$voucher->data_hora				= $data_hora;
+				$voucher->mostrar_valor 		= $agendamento->clinica->mostrar_valor;
+				$pdf 							= PDF::loadView('voucherpdf', ['voucher' => $voucher])->setPaper('A4', 'portrait')->save($destinationpath);
+				
+				$agendamento->url_voucher 		= $url;
+				$agendamento->save();
+				return $url;
+			}
+		}
+	}
+	
+	public static function obterIDVendedor($id)
+	{
+		
+		$retorno               					= new stdClass;
+		$retorno->vendedor_id 					= 0;
+		$retorno->planos 						= array();
+		
+		$vendedor                               =  \App\Models\Vendedor::select('id')->where('user_id','=',$id)->first();
+		
+        if (isset($vendedor->id)) 
+		{
+			$retorno->vendedor_id 				= $vendedor->id;
+			$retorno->planos 					= \App\Models\PlanoVendedor::where('vendedor_id', $vendedor->id)->pluck('plano_id')->toArray();
+		}
+		return $retorno;
+		
+	}
+	
+	public static function obterTokenVendedor($id)
+	{
+		
+		$vendedor                               =  \App\Models\Vendedor::select('id','token')->where('user_id','=',$id)->first();
+		
+        if (isset($vendedor->id)) 
+		{
+			return Cas::nulltoSpace($vendedor->token);
+		}
+		
+		return "";
+		
+	}
+	
+	public static function cancelar_contrato_parcela()
+    {
+		
+		$contratos 							= DB::table('contratos')
+												->whereIn('status', array('canceled','stopped','closed'))
+												->get();
+		foreach ($contratos as $contrato)
+		{
+			Cas::cancelar_parcela_beneficiario($contrato->id);
+		}
+		
+		return true;
+	}
+	
+	public static function cancelar_parcela_beneficiario($id)
+    {
+        
+        $contrato 					= \App\Models\Contrato::find($id);
+		
+		if (!isset($contrato->id))
+		{
+			return false;
+		}
+
+		if (($contrato->status !="canceled") and ($contrato->status !="stopped") and ($contrato->status !="closed"))
+		{
+			return false;
+		}
+		
+		DB::beginTransaction();
+			
+		$parcelas 					= DB::table('parcelas')
+														->where('contrato_id', '=', $id)
+														->where('data_pagamento','=',null)
+														->where('data_baixa','=',null)
+														->update(['status' 		=> 'cancel',
+																  'data_baixa'	=> date('Y-m-d'),
+																  'statusDate'	=> date('Y-m-d H:m:s')
+																]);
+		$beneficiarios 				= DB::table('beneficiarios')
+														->where('contrato_id', $id)
+														->where('ativo','=',1)
+														->update(['ativo' 		 => 0,
+																  'vigencia_fim' => date('Y-m-d'),
+																  'desc_status'	 => 'INATIVO'
+																]);
+		DB::commit();
+				
+		
+		return true;
+    }
+	
+	public static function formatarTextoContrato($html,$id)
+    {
+        // Remove todas as tags HTML exceto <p> e <br>
+        $texto = strip_tags($html, '<p><br>');
+        
+        // Remove atributos das tags
+        $texto = preg_replace('/<([a-z][a-z0-9]*)[^>]*?(\/?)>/si', '<$1$2>', $texto);
+        
+        // Remove espaços extras e quebras de linha
+        $texto = preg_replace('/\s+/', ' ', $texto);
+        
+        // Remove parágrafos vazios
+        $texto = preg_replace('/<p>\s*<\/p>/', '', $texto);
+        
+        // Substitui tags <p> por quebras de linha duplas
+        $texto = str_replace(['<p>', '</p>'], ['', "\n\n"], $texto);
+        
+        // Remove espaços no início e fim
+        $texto = trim($texto);
+        
+        // Garante que parágrafos tenham espaçamento consistente
+        $texto = preg_replace('/\n{3,}/', "\n\n", $texto);
+        
+		$contrato 				                    = \App\Models\Contrato::with('cliente','plano')->find($id);
+                
+        if (isset($contrato->id))
+        {	
+	
+			if (substr_count($texto, '[NRO_CONTRATO]') > 0)
+			{
+				$texto								= str_replace("[NRO_CONTRATO]",$contrato->id,$texto);
+			}
+			
+			if (substr_count($texto, '[ENDERECO_CLIENTE]') > 0)
+			{
+				$endereco 							= $contrato->cliente->cep;
+				$endereco 							.= " - " . $contrato->cliente->logradouro . ", " . $contrato->cliente->numero . " " . Cas::nulltoSpace($contrato->cliente->complemento);
+				$endereco 							.= "\n" .  $contrato->cliente->bairro . " | " . $contrato->cliente->cidade . " | " . $contrato->cliente->estado;
+				$texto								= str_replace("[ENDERECO_CLIENTE]",$endereco,$texto);
+			}
+		
+			if (substr_count($texto, '[NOME_CLIENTE]') > 0)
+			{
+				$texto								= str_replace("[NOME_CLIENTE]",$contrato->cliente->nome,$texto);
+			}
+			
+			if (substr_count($texto, '[DOCUMENTO_CLIENTE]') > 0)
+			{
+				$texto								= str_replace("[DOCUMENTO_CLIENTE]",$contrato->cliente->cpfcnpj,$texto);
+			}
+			
+			if (substr_count($texto, '[TELEFONE_CLIENTE]') > 0)
+			{
+				$texto								= str_replace("[TELEFONE_CLIENTE]",$contrato->cliente->telefone,$texto);
+			}
+			
+			
+			if (substr_count($texto, '[EMAIL_CLIENTE]') > 0)
+			{
+				$texto								= str_replace("[EMAIL_CLIENTE]",$contrato->cliente->email,$texto);
+			}
+			
+			if (substr_count($texto, '[NOME_PLANO]') > 0)
+			{
+				$texto								= str_replace("[NOME_PLANO]",$contrato->plano->nome,$texto);
+			}
+			
+			if (substr_count($texto, '[VALOR_CONTRATO]') > 0)
+			{
+				$valor 								= "R$ " . str_replace(".",".",$contrato->valor);
+				$texto								= str_replace("[VALOR_CONTRATO]",$valor,$texto);
+			}
+			
+			if (substr_count($texto, '[QUANTIDADE_TRANSACOES_CONTRATO]') > 0)
+			{
+				
+				$texto								= str_replace("[QUANTIDADE_TRANSACOES_CONTRATO]",$contrato->plano->parcelas,$texto);
+			}
+		}
+		
+        return $texto;
+    }
+	
+	public static function formatarContratoParaPDF($texto)
+    {
+		
+		 Log::info("formatarContratoParaPDF", ['entrada'	=> $texto]);
+		 
+        // Decodifica caracteres especiais
+       // $texto = json_decode($texto, true);
+        
+        // Remove caracteres especiais Unicode
+        $texto = str_replace(["\u00a0", "\u00ba", "\u00aa"], [" ", "º", "ª"], $texto);
+        
+        // Quebra o texto em parágrafos
+        $paragrafos = preg_split('/\n\s*\n/', $texto);
+        
+        // Remove espaços extras e linhas vazias
+        $paragrafos = array_map(function($p) {
+            return trim(preg_replace('/\s+/', ' ', $p));
+        }, $paragrafos);
+        
+        // Remove parágrafos vazios
+        $paragrafos = array_filter($paragrafos);
+		
+		 Log::info("formatarContratoParaPDF", ['saida'	=> $paragrafos]);
+        
+        return $paragrafos;
+    }
+	
+	public static function obter_parcelaAbertas($contrato_id)
+    {
+		$ids 						= array();
+		
+		$parcelas 					= DB::table('parcelas')
+										->select('galaxPayId','boletopdf')
+										->where('contrato_id', '=', $contrato_id)
+										->where('data_pagamento','=',null)
+										->where('data_baixa','=',null)
+										->where('galaxPayId','>',0)
+										->orderBy('nparcela')
+										->get();
+														
+		 foreach ($parcelas as $parcela)
+         {
+			 $ids[]					= $parcela->galaxPayId;
+		 }
+		 
+		 return implode(",", $ids);
+	}
+	
+	/**
+	 * Função para calcular juros e multa de boletos em atraso
+	 * 
+	 * @param float $valorBoleto Valor original do boleto
+	 * @param string|int $dataVencimentoOuDiasAtraso Data de vencimento no formato 'Y-m-d' (ex: '2023-12-31') ou número de dias em atraso
+	 * @param string|null $dataAtual Data atual para cálculo no formato 'Y-m-d' (opcional, padrão: data atual)
+	 * @param float $taxaJurosMensal Taxa de juros mensal em percentual (opcional, padrão: 1%)
+	 * @param float $percentualMulta Percentual da multa por atraso (opcional, padrão: 2%)
+	 * @return array Array com os valores calculados
+	 */
+	public static function  calcularJurosBoleto($valorBoleto, $dataVencimentoOuDiasAtraso, $dataAtual = null, $taxaJurosMensal = 5.0, $percentualMulta = 2.0) 
+	{
+		
+		$retorno               					= new stdClass;
+		$retorno->erro 							= "";
+		$retorno->valorOriginal					= 0;
+		$retorno->diasAtraso					= 0;
+		$retorno->taxaJurosMensal				= 0;
+		$retorno->taxaJurosDiaria				= 0;
+		$retorno->juros							= 0;
+		$retorno->percentualMulta				= 0;
+		$retorno->multa							= 0;
+		$retorno->multaJuros					= 0;
+		$retorno->valorTotal					= 0;
+		$retorno->emAtraso						= 0;
+		
+		// Validação dos parâmetros
+		if (!is_numeric($valorBoleto) || $valorBoleto <= 0) {
+			$retorno->erro 						= 'Valor do boleto inválido';
+			return $retorno;
+		}
+		
+		// Verificar se o segundo parâmetro é um número de dias em atraso
+		if (is_numeric($dataVencimentoOuDiasAtraso) && is_int($dataVencimentoOuDiasAtraso + 0)) 
+		{
+			// Usar diretamente o número de dias em atraso
+			$diasAtraso 							= max(0, (int)$dataVencimentoOuDiasAtraso);
+			$emAtraso 								= $diasAtraso > 0;
+		} else {
+			// Usar o formato de data tradicional
+			try {
+				$vencimento 						= new DateTime($dataVencimentoOuDiasAtraso);
+				$atual 								= $dataAtual ? new DateTime($dataAtual) : new DateTime('now');
+			} catch (Exception $e) {
+				$retorno->erro 						= 'Formato de data inválido';
+				return $retorno;
+			}
+			
+			// Se não estiver em atraso, retorna o valor original
+			if ($atual <= $vencimento) 
+			{
+				$retorno->valorOriginal				= $valorBoleto;
+				$retorno->diasAtraso				= 0;
+				$retorno->juros						= 0;
+				$retorno->multa						= 0;
+				$retorno->valorTotal				= 0;
+				$retorno->emAtraso					= 0;
+				return $retorno;
+			}
+			
+			// Calcular dias de atraso
+			$diasAtraso 							= $vencimento->diff($atual)->days;
+			$emAtraso 								= true;
+		}
+		
+		// Converter taxa mensal para diária (considerando mês de 30 dias)
+		$taxaJurosDiaria 							= ($taxaJurosMensal / 30) / 100;
+		
+		// Calcular juros
+		$juros 										= $valorBoleto * $taxaJurosDiaria * $diasAtraso;
+		
+		// Calcular multa
+		$multa 										= $valorBoleto * ($percentualMulta / 100);
+		
+		// Calcular valor total
+		$valorTotal 								= $valorBoleto + $juros + $multa;
+		$multaJuros 								= $juros + $multa;
+		// Retornar array com todos os valores calculados
+	
+		$retorno->valorOriginal						= $valorBoleto;
+		$retorno->diasAtraso						= $diasAtraso;
+		$retorno->taxaJurosMensal					= $taxaJurosMensal;
+		$retorno->taxaJurosDiaria					= $taxaJurosDiaria * 100;
+		$retorno->juros								= $juros;
+		$retorno->percentualMulta					= $percentualMulta;
+		$retorno->multa								= $multa;
+		$retorno->multaJuros 						= $multaJuros;
+		$retorno->valorTotal						= $valorTotal;
+		$retorno->emAtraso							= $emAtraso;
+		return $retorno;
+	}
+	
+	
+	public static function ajustarDiaVencimento($data)
+	{
+		if (substr_count($data, '-') == 2) 
+		{
+			list($ano, $mes, $dia) 					= explode("-",$data);
+			$formato 								= 'A';
+		} else {
+			if (substr_count($data, '/') == 2) 
+			{
+				list($dia, $mes, $ano) 				= explode("/",$data);
+				$formato 							= 'B';
+			} else {
+				return $data;
+			}
+		}
+		
+		// Lista de dias por mês (Janeiro = 1, Fevereiro = 2, ..., Dezembro = 12)
+		$diasPorMes = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+		// Verifica se o mês é fevereiro e se o ano é bissexto
+		// Fevereiro (0-indexado)
+		if ($mes === 2) 
+		{ 
+			$ehBissexto 							= ($ano % 4 === 0 && $ano % 100 !== 0) || ($ano % 400 === 0);
+			$ndia 									= min($dia, $ehBissexto ? 29 : 28);
+		} else {
+			// Para outros meses, usa a tabela de dias por mês
+			$ndia  									= min($dia, $diasPorMes[$mes - 1]);
+		}
+		
+		if ($formato == 'A')
+		{
+			$data 									= $ano . "-" . $mes . "-"  . $ndia;
+		} else {
+			$data 									= $ndia . "/" . $mes . "/"  . $ano;
+		}
+		return $data; 
+	}
+	
+	public static function compararAgendamentos($agendamentoA, $agendamento, $incluirCamposVazios = true)
+	{
+		// Campos que devem ser comparados
+		$camposComparacao = [
+			'clinica_id', 
+			'especialidade_id', 
+			'dmedico', 
+			'solicitado_data_hora', 
+			'solicitado_por',
+			'preagendamento_data_hora', 
+			'preagendamento_por', 
+			'agendamento_por', 
+			'confirmado_data_hora',
+			'confirmado_por', 
+			'cancelado_data_hora', 
+			'cancelado_por', 
+			'pagamento_data_hora', 
+			'pagamento_por',
+			'saldo', 
+			'valor', 
+			'desconto', 
+			'valor_a_pagar', 
+			'vencimento', 
+			'pagamento', 
+			'baixa', 
+			'confirma',
+			'cobranca', 
+			'forma', 
+			'situacao', 
+			'parcelas', 
+			'cidade', 
+			'estado', 
+			'peso', 
+			'altura',
+			'medicamento', 
+			'observacao', 
+			'agendamento_data_hora', 
+			'asituacao_id', 
+			'cmotivo_id'
+		];
+
+		// Nomes amigáveis para os campos
+		$nomesAmigaveis = [
+			'clinica_id' => 'Clínica',
+			'especialidade_id' => 'Especialidade',
+			'dmedico' => 'Médico',
+			'solicitado_data_hora' => 'Data/Hora Solicitação',
+			'solicitado_por' => 'Solicitado Por',
+			'preagendamento_data_hora' => 'Data/Hora Pré-agendamento',
+			'preagendamento_por' => 'Pré-agendado Por',
+			'agendamento_por' => 'Agendado Por',
+			'confirmado_data_hora' => 'Data/Hora Confirmação',
+			'confirmado_por' => 'Confirmado Por',
+			'cancelado_data_hora' => 'Data/Hora Cancelamento',
+			'cancelado_por' => 'Cancelado Por',
+			'pagamento_data_hora' => 'Data/Hora Pagamento',
+			'pagamento_por' => 'Pago Por',
+			'saldo' => 'Saldo',
+			'valor' => 'Valor',
+			'desconto' => 'Desconto',
+			'valor_a_pagar' => 'Valor a Pagar',
+			'vencimento' => 'Vencimento',
+			'pagamento' => 'Pagamento',
+			'baixa' => 'Baixa',
+			'confirma' => 'Confirma',
+			'cobranca' => 'Cobrança',
+			'forma' => 'Forma',
+			'situacao' => 'Situação',
+			'parcelas' => 'Parcelas',
+			'cidade' => 'Cidade',
+			'estado' => 'Estado',
+			'peso' => 'Peso',
+			'altura' => 'Altura',
+			'medicamento' => 'Medicamento',
+			'observacao' => 'Observação',
+			'agendamento_data_hora' => 'Data/Hora Agendamento',
+			'asituacao_id' => 'Situação ID',
+			'cmotivo_id' => 'Motivo ID'
+		];
+
+		// Campos que são datas
+		$camposDatas = [
+			'solicitado_data_hora', 
+			'preagendamento_data_hora', 
+			'confirmado_data_hora',
+			'cancelado_data_hora', 
+			'pagamento_data_hora', 
+			'agendamento_data_hora',
+			'vencimento', 
+			'pagamento', 
+			'baixa'
+		];
+
+		// Campos monetários
+		$camposMonetarios = ['saldo', 'valor', 'desconto', 'valor_a_pagar'];
+		
+
+		// Converter para arrays se necessário
+		$dadosA = self::converterParaArrayAgendamento($agendamentoA);
+		$dadosB = self::converterParaArrayAgendamento($agendamento);
+
+		$mudancas = [];
+		$contadorMudancas = 0;
+
+		foreach ($camposComparacao as $campo) {
+			
+			$valorA = $dadosA[$campo] ?? null;
+			$valorB = $dadosB[$campo] ?? null;
+
+			// Normalizar valores para comparação
+			$valorANormalizado = self::normalizarValorAgendamentoCorrigido($valorA,$campo, $camposMonetarios,$camposDatas);
+			$valorBNormalizado = self::normalizarValorAgendamentoCorrigido($valorB,$campo, $camposMonetarios,$camposDatas);
+
+			// Verificar se houve mudança
+			if ($valorANormalizado !== $valorBNormalizado) {
+				// Verificar se deve incluir campos vazios
+				if (!$incluirCamposVazios && 
+					(empty($valorANormalizado) || empty($valorBNormalizado))) {
+					continue;
+				}
+
+				$contadorMudancas++;
+				$nomeCampo = $nomesAmigaveis[$campo] ?? $campo;
+				
+				// Formatar valores para exibição
+				$valorAFormatado = self::formatarValorParaExibicaoAgendamento($campo, $valorA, $camposDatas, $camposMonetarios);
+				$valorBFormatado = self::formatarValorParaExibicaoAgendamento($campo, $valorB, $camposDatas, $camposMonetarios);
+
+				// Criar texto da mudança
+				if ((is_string($valorAFormatado)) and (is_string($valorBFormatado)))
+				{
+					$mudancas[] = "• {$nomeCampo}: " . $valorAFormatado . " → " . $valorBFormatado;
+				} else {
+					$mudancas[] = "• {$nomeCampo}: Mudou valor";
+				}
+			}
+		}
+
+		// Retornar resultado
+		if (empty($mudancas)) {
+			return "Nenhuma alteração detectada nos dados do agendamento.";
+		}
+
+		$cabecalho = "";
+		//$cabecalho .= "Total de campos alterados: {$contadorMudancas}\n";
+		//$cabecalho .= "Data da comparação: " . date('d/m/Y H:i:s') . "\n\n";
+
+		return $cabecalho . implode("\n", $mudancas);
+	}
+
+	/**
+	 * Versão simplificada que retorna apenas os campos alterados
+	 */
+	public static function compararAgendamentosSimples($agendamentoA, $agendamento)
+	{
+		$camposComparacao = [
+			'clinica_id', 
+			'especialidade_id', 
+			'dmedico', 
+			'solicitado_data_hora', 
+			'solicitado_por',
+			'preagendamento_data_hora', 
+			'preagendamento_por', 
+			'agendamento_por', 
+			'confirmado_data_hora',
+			'confirmado_por', 
+			'cancelado_data_hora', 
+			'cancelado_por', 
+			'pagamento_data_hora', 
+			'pagamento_por',
+			'saldo', 
+			'valor', 
+			'desconto', 
+			'valor_a_pagar', 
+			'vencimento', 
+			'pagamento', 
+			'baixa', 
+			'confirma',
+			'cobranca', 
+			'forma', 
+			'situacao', 
+			'parcelas', 
+			'cidade', 
+			'estado', 
+			'peso', 
+			'altura',
+			'medicamento', 
+			'observacao', 
+			'agendamento_data_hora', 
+			'asituacao_id', 
+			'cmotivo_id'
+		];
+
+		$nomesAmigaveis = [
+			'clinica_id' => 'Clínica', 
+			'especialidade_id' => 'Especialidade', 
+			'dmedico' => 'Médico',
+			'solicitado_data_hora' => 'Data/Hora Solicitação', 
+			'solicitado_por' => 'Solicitado Por',
+			'preagendamento_data_hora' => 'Data/Hora Pré-agendamento', 
+			'preagendamento_por' => 'Pré-agendado Por',
+			'agendamento_por' => 'Agendado Por', 
+			'confirmado_data_hora' => 'Data/Hora Confirmação',
+			'confirmado_por' => 'Confirmado Por', 
+			'cancelado_data_hora' => 'Data/Hora Cancelamento',
+			'cancelado_por' => 'Cancelado Por', 
+			'pagamento_data_hora' => 'Data/Hora Pagamento',
+			'pagamento_por' => 'Pago Por', 
+			'saldo' => 'Saldo', 
+			'valor' => 'Valor', 
+			'desconto' => 'Desconto',
+			'valor_a_pagar' => 'Valor a Pagar', 
+			'vencimento' => 'Vencimento', 
+			'pagamento' => 'Pagamento',
+			'baixa' => 'Baixa', 
+			'confirma' => 'Confirma', 
+			'cobranca' => 'Cobrança', 
+			'forma' => 'Forma',
+			'situacao' => 'Situação', 
+			'parcelas' => 'Parcelas', 
+			'cidade' => 'Cidade',
+			'estado' => 'Estado', 
+			'peso' => 'Peso', 
+			'altura' => 'Altura', 
+			'medicamento' => 'Medicamento',
+			'observacao' => 'Observação', 
+			'agendamento_data_hora' => 'Data/Hora Agendamento',
+			'asituacao_id' => 'Situação ID', 
+			'cmotivo_id' => 'Motivo ID'
+		];
+
+		$dadosA = self::converterParaArrayAgendamento($agendamentoA);
+		$dadosB = self::converterParaArrayAgendamento($agendamento);
+
+		$mudancas = [];
+
+		foreach ($camposComparacao as $campo) {
+			$valorA = self::normalizarValorAgendamento($dadosA[$campo] ?? null);
+			$valorB = self::normalizarValorAgendamento($dadosB[$campo] ?? null);
+
+			if ($valorA !== $valorB) {
+				$nomeCampo = $nomesAmigaveis[$campo] ?? $campo;
+				$mudancas[] = "• {$nomeCampo} alterado";
+			}
+		}
+
+		return empty($mudancas) ? 
+			"Nenhuma alteração detectada." : 
+			implode("\n", $mudancas);
+	}
+
+	/**
+	 * Retorna apenas os nomes dos campos que foram alterados
+	 */
+	public static function getCamposAlteradosAgendamento($agendamentoA, $agendamento)
+	{
+		$camposComparacao = [
+			'clinica_id', 
+			'especialidade_id', 
+			'dmedico', 
+			'solicitado_data_hora', 
+			'solicitado_por',
+			'preagendamento_data_hora', 
+			'preagendamento_por', 
+			'agendamento_por', 
+			'confirmado_data_hora',
+			'confirmado_por', 
+			'cancelado_data_hora', 
+			'cancelado_por', 
+			'pagamento_data_hora', 
+			'pagamento_por',
+			'saldo', 
+			'valor', 
+			'desconto', 
+			'valor_a_pagar', 
+			'vencimento', 
+			'pagamento', 
+			'baixa', 
+			'confirma',
+			'cobranca', 
+			'forma', 
+			'situacao', 
+			'parcelas', 
+			'cidade', 
+			'estado', 
+			'peso', 
+			'altura',
+			'medicamento', 
+			'observacao', 
+			'agendamento_data_hora', 
+			'asituacao_id', 
+			'cmotivo_id'
+		];
+
+		$dadosA = self::converterParaArrayAgendamento($agendamentoA);
+		$dadosB = self::converterParaArrayAgendamento($agendamento);
+
+		$camposAlterados = [];
+
+		foreach ($camposComparacao as $campo) {
+			$valorA = self::normalizarValorAgendamento($dadosA[$campo] ?? null);
+			$valorB = self::normalizarValorAgendamento($dadosB[$campo] ?? null);
+
+			if ($valorA !== $valorB) {
+				$camposAlterados[] = $campo;
+			}
+		}
+
+		return $camposAlterados;
+	}
+
+	/**
+	 * Versão detalhada com histórico
+	 */
+	public static function compararAgendamentosComHistorico($agendamentoA, $agendamento, $usuario = null)
+	{
+		$resultado = self::compararAgendamentos($agendamentoA, $agendamento);
+		
+		if ($usuario) {
+			$resultado .= "\n\nAlteração realizada por: {$usuario}";
+		}
+
+		$resultado .= "\nData/Hora: " . date('d/m/Y H:i:s');
+		
+		return $resultado;
+	}
+
+	/**
+	 * Converte objeto ou array para array associativo
+	 */
+	private static function converterParaArrayAgendamento($dados)
+	{
+		if (is_object($dados)) {
+			if (method_exists($dados, 'toArray')) {
+				return $dados->toArray();
+			}
+			return (array) $dados;
+		}
+
+		return is_array($dados) ? $dados : [];
+	}
+
+	/**
+	 * Normaliza valor para comparação - VERSÃO CORRIGIDA
+	 */
+	private static function normalizarValorAgendamentoCorrigido($valor, $campo, $camposMonetarios, $camposDatas)
+	{
+		if (is_null($valor)) {
+			return '';
+		}
+
+		if (is_bool($valor)) {
+			return $valor ? '1' : '0';
+		}
+
+		// CORREÇÃO: Tratamento especial para valores monetários
+		if (in_array($campo, $camposMonetarios)) {
+			if ($valor === '' || $valor === null) {
+				return '0.00';
+			}
+			
+			// Converter para float e depois para string com 2 decimais
+			$valorFloat = (float) $valor;
+			return number_format($valorFloat, 2, '.', '');
+		}
+
+		// CORREÇÃO: Tratamento especial para datas
+		if (in_array($campo, $camposDatas)) {
+			if (empty($valor)) {
+				return '';
+			}
+			
+			// Normalizar formato de data para comparação
+			$timestamp = strtotime($valor);
+			if ($timestamp !== false) {
+				return date('Y-m-d H:i:s', $timestamp);
+			}
+			
+			return trim((string) $valor);
+		}
+
+		if (is_numeric($valor)) {
+			return (string) $valor;
+		}
+
+		return $valor;
+	}
+
+	/**
+	 * Normaliza valor para comparação
+	 */
+	private static function normalizarValorAgendamento($valor)
+	{
+		if (is_null($valor)) {
+			return '';
+		}
+
+		if (is_bool($valor)) {
+			return $valor ? '1' : '0';
+		}
+
+		if (is_numeric($valor)) {
+			return (string) $valor;
+		}
+
+		return trim($valor);
+	}
+
+	/**
+	 * Formata valor para exibição conforme o tipo do campo
+	 */
+	private static function formatarValorParaExibicaoAgendamento($campo, $valor, $camposDatas, $camposMonetarios)
+	{
+		if (is_null($valor) || $valor === '') {
+			return '[Vazio]';
+		}
+
+		// Campos de data
+		if (in_array($campo, $camposDatas)) {
+			return self::formatarDataAgendamento($valor);
+		}
+
+		// Campos monetários
+		if (in_array($campo, $camposMonetarios)) {
+			return self::formatarValorMonetarioAgendamento($valor);
+		}
+
+		// Campos booleanos
+		if (is_bool($valor)) {
+			return $valor ? 'Sim' : 'Não';
+		}
+
+		// Campos com IDs - buscar nomes se possível
+		if (str_ends_with($campo, '_id')) {
+			return self::buscarNomePorIdAgendamento($campo, $valor);
+		}
+
+		return $valor;
+	}
+
+	/**
+	 * Formata data para exibição
+	 */
+	private static function formatarDataAgendamento($data)
+	{
+		try {
+			if (empty($data)) {
+				return '[Vazio]';
+			}
+
+			// Se já está no formato brasileiro, manter
+			if (preg_match('/^\d{2}\/\d{2}\/\d{4}/', $data)) {
+				return $data;
+			}
+
+			// Converter do formato banco (Y-m-d H:i:s) para brasileiro
+			$timestamp = strtotime($data);
+			if ($timestamp !== false) {
+				return date('d/m/Y H:i:s', $timestamp);
+			}
+
+			return (string) $data;
+		} catch (Exception $e) {
+			return (string) $data;
+		}
+	}
+
+	/**
+	 * Formata valor monetário
+	 */
+	private static function formatarValorMonetarioAgendamento($valor)
+	{
+		if (is_null($valor) || $valor === '') {
+			return '[Vazio]';
+		}
+
+		return 'R$ ' . number_format((float) $valor, 2, ',', '.');
+	}
+
+	/**
+	 * Busca nome por ID em tabelas relacionadas
+	 */
+	private static function buscarNomePorIdAgendamento($campo, $id)
+	{
+		if (empty($id)) {
+			return '[Vazio]';
+		}
+
+		try {
+			switch ($campo) {
+				case 'clinica_id':
+					$nome = DB::table('clinicas')->where('id', $id)->value('nome');
+					return $nome ? "{$nome} (ID: {$id})" : "ID: {$id}";
+
+				case 'especialidade_id':
+					$nome = DB::table('especialidades')->where('id', $id)->value('nome');
+					return $nome ? "{$nome} (ID: {$id})" : "ID: {$id}";
+
+				case 'asituacao_id':
+					$nome = DB::table('asituacoes')->where('id', $id)->value('nome');
+					return $nome ? "{$nome} (ID: {$id})" : "ID: {$id}";
+
+				case 'cmotivo_id':
+					$nome = DB::table('agendamento_cmotivos')->where('id', $id)->value('nome');
+					return $nome ? "{$nome} (ID: {$id})" : "ID: {$id}";
+
+				case 'solicitado_por':
+				case 'preagendamento_por':
+				case 'agendamento_por':
+				case 'confirmado_por':
+				case 'cancelado_por':
+				case 'pagamento_por':
+					$nome = DB::table('users')->where('id', $id)->value('name');
+					return $nome ? "{$nome} (ID: {$id})" : "ID: {$id}";
+
+				default:
+					return "ID: {$id}";
+			}
+		} catch (Exception $e) {
+			return "ID: {$id}";
+		}
+	}
+	
+	private static function obterComo($transaction)
+	{
+		$achar_como 								= "";
+				
+		if  ((isset($transaction->chargeMyId)) and (Cas::nulltoSpace($transaction->chargeMyId) !=""))
+		{
+			$achar_como								= 'chargeMyId';
+		} else {
+			if ((isset($transaction->chargeGalaxPayId)) and (Cas::nulltoSpace($transaction->chargeGalaxPayId) !=""))
+			{
+				$achar_como							= 'chargeGalaxPayId';
+			} else {
+				$achar_como							= 'galaxPayId';
+			}
+		}
+		
+		return $achar_como;
+	}
+	
+	private static function obterParcelaComo($transaction,$achar_como)
+	{
+		$parcela             		= new stdClass;
+		$parcela->id 				= 0;
+				
+		switch ($achar_como) 
+		{
+			case 'chargeMyId':
+				$parcela 			= Cas::obterParcelaMyId($transaction);
+				break;
+			case 'chargeGalaxPayId':
+				$parcela 			= Cas::obterParcelachargeMyId($transaction);
+				break;
+			case 'galaxPayId':
+				$parcela 			= Cas::obterParcelagalaxPayId($transaction);
+				break;
+		}	
+		
+		return $parcela;
+	}
+	
+	private static function obterParcelaMyId($transaction)
+	{
+		
+		if (substr_count($transaction->chargeMyId, '#') == 2)
+		{
+			list($contrato_id,$parcela_id,$aleatorio)       = explode("#",$transaction->chargeMyId);
+			$parcela 				= DB::table('parcelas as p')
+										->join('contratos as c', 'c.id', '=', 'p.contrato_id')
+										->where('c.id', $contrato_id)
+										->where('p.id', $parcela_id)
+										->select('p.id', 'p.status', 'p.data_vencimento','p.data_pagamento','p.data_baixa','p.contrato_id')
+										->first();
+									
+		}			
+
+		if (!isset($parcela->id))
+		{
+			Log::info("obterParcelaMyId", ['contrato_id' => $contrato_id, 'parcela_id'=> $parcela_id ]);
+			$parcela 				= DB::table('parcelas')
+										->where('cgalaxPayId', $transaction->chargeGalaxPayId)
+										->where('galaxPayId', $transaction->galaxPayId)
+										->select('id', 'status', 'data_vencimento','data_pagamento','data_baixa','contrato_id')
+										->first();
+		} 
+		
+		if (!isset($parcela->id))
+		{
+			Log::info("obterParcelaMyId", ['cgalaxPayId' => $transaction->chargeGalaxPayId, 'galaxPayId'=> $transaction->galaxPayId ]);
+			$parcela             	= new stdClass;
+			$parcela->id 			= 0;
+		}
+
+		return $parcela;
+		
+		//$transaction->chargeMyId
+	}
+	
+	private static function obterParcelachargeMyId($transaction)
+	{
+		//$transaction->chargeGalaxPayId
+		
+		$parcela 				= DB::table('parcelas')
+									->where('cgalaxPayId', $transaction->chargeGalaxPayId)
+									->where('galaxPayId', $transaction->galaxPayId)
+									->select('id', 'status', 'data_vencimento', 'data_pagamento','data_baixa','contrato_id')
+									->first();
+									
+		if (!isset($parcela->id))
+		{
+			Log::info("obterParcelachargeMyId", ['cgalaxPayId' => $transaction->chargeGalaxPayId, 'galaxPayId'=> $transaction->galaxPayId ]);
+			$parcela             = new stdClass;
+			$parcela->id 		 = 0;
+		} 
+		
+		return $parcela;
+	}
+	
+	private static function obterParcelagalaxPayId($transaction)
+	{
+		//$transaction->galaxPayId, $transaction->subscriptionGalaxPayId
+		
+		$parcela 				= DB::table('parcelas as p')
+									->join('contratos as c', 'c.id', '=', 'p.contrato_id')
+									->where('c.galaxPayId', $transaction->subscriptionGalaxPayId)
+									->where('p.galaxPayId', $transaction->galaxPayId)
+									->select('p.id', 'p.status',  'p.data_vencimento', 'p.data_pagamento','data_baixa','p.contrato_id')
+									->first();
+									
+		if (!isset($parcela->id))
+		{
+			Log::info("obterParcelagalaxPayId", ['galaxPayId' => $transaction->subscriptionGalaxPayId, 'galaxPayId'=> $transaction->galaxPayId ]);
+			$parcela            = new stdClass;
+			$parcela->id 		= 0;
+		} 
+		
+		return $parcela;
+	
+	}
+	
+	private static function atualizarCriarParcela($transaction,$parcela,$transacao_data_id,$atualizar='N')
+	{
+		$transctions 													= array();
+		
+		if ($parcela->id > 0)
+		{			
+			if ($parcela->status != $transaction->status)
+			{
+				switch ($transaction->status) 
+				{
+					case 'captured':
+					case 'payedBoleto':
+					case 'payExternal':
+					case 'payedPix':
+						if  ($parcela->data_pagamento != substr($transaction->paydayDate,0,10))
+						{
+							$aparcela 				                		= \App\Models\Parcela::find($parcela->id);
+																	  
+							if (isset($aparcela->id))
+							{			 
+								 Log::info("pagar", ['parcela_id' => $parcela->id ]);
+								 
+								 if ($atualizar ==='S')
+								 {
+									$aparcela->data_pagamento		    	= substr($transaction->paydayDate,0,10);
+									$aparcela->statusDate			    	= $transaction->statusDate;
+									$aparcela->statusDescription			= $transaction->statusDescription;
+									$aparcela->additionalInfo				= $transaction->additionalInfo;
+									$aparcela->galaxPayId			        = $transaction->galaxPayId;
+								 
+									if (isset($transaction->chargeGalaxPayId))
+									{
+										$aparcela->cgalaxPayId			    = $transaction->chargeGalaxPayId;
+									}
+							
+									if (isset($transaction->payedOutsideGalaxPay))
+									{
+										$aparcela->payedOutsideGalaxPay	 	= $transaction->payedOutsideGalaxPay;
+									} else {
+										$aparcela->payedOutsideGalaxPay		= false;
+									}
+									$aparcela->save();
+									$transctions[]							= $aparcela;
+								 } else {
+									$divergencia            		        = new \App\Models\TransacaoDivergencia();
+									$divergencia->transacao_data_id			= $transacao_data_id;
+									$divergencia->parcela_id				= $parcela->id;
+									$divergencia->contrato_id 				= $parcela->contrato_id;
+									$divergencia->galaxPayId				= $transaction->galaxPayId;
+									if (isset($transaction->chargeGalaxPayId))
+									{
+										$divergencia->cgalaxPayId			= $transaction->chargeGalaxPayId;
+									}
+									$divergencia->status					= $transaction->status;
+									$divergencia->value 					= ($transaction->value / 100);
+									$divergencia->payday					= $transaction->payday;
+									$divergencia->statusDate				= $transaction->statusDate;
+									$divergencia->statusDescription			= $transaction->statusDescription;
+									$divergencia->additionalInfo			= $transaction->additionalInfo;
+									$divergencia->data_pagamento			= substr($transaction->paydayDate,0,10);
+									$divergencia->data_baixa				= null;
+									$divergencia->situacao 					= 'Atualizar Pagamento CRM';
+									$divergencia->transacao 				= null; 
+									$divergencia->save();
+									$transctions[]							= $divergencia;
+								 }
+							}
+						}
+						break;
+					case 'cancelByContract':
+					case 'cancel':
+						if  ($parcela->data_baixa != substr($transaction->statusDate,0,10))
+						{
+							$aparcela                               							= \App\Models\Parcela::where('contrato_id','=',$parcela->contrato_id)
+																													 ->where('data_vencimento','=',$transaction->payday)
+																													 ->where('id','<>',$parcela->id)
+																													 ->first();
+							if (!isset($aparcela->id))
+							{								
+								$aparcela 				               	 						= \App\Models\Parcela::find($parcela->id);
+																		  
+								if (isset($aparcela->id))
+								{
+									$permite 													= 'N';
+									$document													= "";
+									$customerGalaxPayId											=  0;
+									
+									if (isset($transaction->Subscription))
+									{
+										if (isset($transaction->Subscription->Customer))
+										{
+											$document											= $transaction->Subscription->Customer->document;
+											$customerGalaxPayId									= $transaction->Subscription->Customer->galaxPayId;
+										} 
+									} else {
+										if (isset($transaction->Charge))
+										{
+											if (isset($transaction->Charge->Customer))
+											{
+												$document										= $transaction->Charge->Customer->document;
+												$customerGalaxPayId								= $transaction->Charge->Customer->galaxPayId;
+											} 
+										} 
+									}
+									try {
+										$resultado = CelCash::listarTransacoesVencimento(
+											$transaction->payday,
+											$transaction->payday,
+											$customerGalaxPayId
+										);
+										if ((isset($resultado->totalQtdFoundInPage)) and ($resultado->totalQtdFoundInPage > 0)) 
+										{	
+											foreach ($resultado->Transactions as $ctransaction) 
+											{
+												if (($transaction->galaxPayId == $ctransaction->galaxPayId) and ($transaction->status == $ctransaction->status))
+												{
+													$permite 										= 'S';
+												}
+											}
+										}
+									} catch (\Exception $e) {
+										\Log::error('Erro no processamento de listarTransacoesVencimento', [
+											'payday' 			=> $transaction->payday,
+											'customerGalaxPayId'=> $customerGalaxPayId
+										]);
+									}
+									if ($permite == 'S')
+									{
+										Log::info("cancelar", ['parcela_id'	 						=> $parcela->id ]);
+										if ($atualizar ==='S')
+										{
+											$aparcela->data_baixa		   	 						= substr($transaction->statusDate,0,10);
+											$aparcela->statusDate			    					= $transaction->statusDate;
+											$aparcela->statusDescription							= $transaction->statusDescription;
+											$aparcela->save();
+											$transctions[]											= $aparcela;
+										 } else {
+											$divergencia            		       	 				= new \App\Models\TransacaoDivergencia();
+											$divergencia->transacao_data_id							= $transacao_data_id;
+											$divergencia->parcela_id								= $parcela->id;
+											$divergencia->contrato_id 								= $parcela->contrato_id;
+											$divergencia->galaxPayId								= $transaction->galaxPayId;
+											if (isset($transaction->chargeGalaxPayId))
+											{
+												$divergencia->cgalaxPayId							= $transaction->chargeGalaxPayId;
+											}
+											$divergencia->status									= $transaction->status;
+											$divergencia->value 									= ($transaction->value / 100);
+											$divergencia->payday									= $transaction->payday;
+											$divergencia->statusDate								= $transaction->statusDate;
+											$divergencia->statusDescription							= $transaction->statusDescription;
+											$divergencia->additionalInfo							= $transaction->additionalInfo;
+											$divergencia->data_pagamento							= null;
+											$divergencia->data_baixa								= substr($transaction->statusDate,0,10);
+											$divergencia->situacao 									= 'Atualizar Baixa CRM';
+											$divergencia->transacao 								= null; 
+											$divergencia->save();
+											$transctions[]											= $divergencia;
+										 }
+									}
+								}
+							}
+						}
+						break;
+					default:
+						Cas::transacaoNencontrada($transaction);
+						return;
+				}
+			}
+		} else {
+			$document													= "";
+			$customerGalaxPayId											= 0;
+			if (isset($transaction->Subscription))
+			{
+				if (isset($transaction->Subscription->Customer))
+				{
+					$document											= $transaction->Subscription->Customer->document;
+					$customerGalaxPayId									= $transaction->Subscription->Customer->galaxPayId;
+				} else {
+					Cas::transacaoNencontrada($transaction);
+				}
+			} else {
+				if (isset($transaction->Charge))
+				{
+					if (isset($transaction->Charge->Customer))
+					{
+						$document										= $transaction->Charge->Customer->document;
+						$customerGalaxPayId								= $transaction->Charge->Customer->galaxPayId;
+					} else {
+						Cas::transacaoNencontrada($transaction);
+					}
+				} else {
+					Cas::transacaoNencontrada($transaction);
+				}
+			}
+			if ($document != "")
+			{
+				$document 												= str_pad($document, 11, '0', STR_PAD_LEFT);
+				$cliente                    							= \App\Models\Cliente::where('cpfcnpj','=',$document)->first();
+
+				if (isset($cliente->id))     
+				{
+					
+					//Log::info("cliente", ['cliente_id' => $cliente->id ]);
+					$contrato 											= \App\Models\Contrato::where('cliente_id', '=', $cliente->id)
+																						->whereIn('status', array('active','waitingPayment'))
+																						->first();
+					if (!isset($contrato->id))
+					{
+						$contrato 										= \App\Models\Contrato::where('cliente_id', '=', $cliente->id)
+																					 ->whereNotIn('status', array('active','waitingPayment'))
+																					 ->orderBy('updated_at', 'desc')
+																					 ->first();
+					}
+					//Log::info("contrato", ['contrato' => $contrato ]);
+					if (isset($contrato->id))
+					{
+						$parcela                               				= \App\Models\Parcela::where('contrato_id','=',$contrato->id)
+																						         ->where('data_vencimento','=',$transaction->payday)
+																					             ->first();
+						if (!isset($parcela->id))
+						{
+							Log::info("nova parcela", ['transaction' => $transaction ]);
+							
+							if ($atualizar ==='S')
+							{								
+								$parcela            		            	= new \App\Models\Parcela();
+								$parcela->contrato_id 						= $contrato->id;
+								$parcela->data_vencimento	    			= $transaction->payday;
+								$parcela->data_pagamento					= $transaction->paydayDate ?  substr($transaction->paydayDate,0,10) : null ;
+								
+								$value                                      = ($transaction->value / 100);
+								if (isset($transaction->fee))
+								{
+									$parcela->taxa					        = ($transaction->fee / 100);
+								}
+								$parcela->valor					        	= $contrato->valor;
+								if ($transaction->installment !=1)
+								{
+									if ($contrato->valor > $value) 
+									{
+										$parcela->desconto				    = $contrato->valor - $value;
+									}
+									if ($contrato->valor < $value) 
+									{
+										$parcela->juros					    = $value - $contrato->valor;
+									}
+								}
+								$parcela->valor_pago			            = $value;
+								$parcela->nparcela				        	= $transaction->installment;
+								$parcela->galaxPayId			            = $transaction->galaxPayId;
+								if (isset($transaction->chargeGalaxPayId))
+								{
+									$parcela->cgalaxPayId			        = $transaction->chargeGalaxPayId;
+								}
+								$parcela->status				            = Cas::nulltoSpace($transaction->status);
+								$parcela->statusDescription		            = Cas::nulltoSpace($transaction->statusDescription);
+								if ((isset($transaction->statusDate)) and (Cas::temData($transaction->statusDate)))
+								{
+									$parcela->statusDate			        = $transaction->statusDate;
+								} 
+								if ($parcela->status !="")
+								{
+									if (($parcela->status == 'cancel') and (Cas::temData($transaction->statusDate)))
+									{
+										$parcela->data_baixa			    = substr($transaction->statusDate,0,10);
+									}
+								} 
+								$parcela->additionalInfo		            = Cas::nulltoSpace($transaction->additionalInfo);
+								if (isset($transaction->subscriptionMyId))
+								{
+									$parcela->subscriptionMyId		        = Cas::nulltoSpace($transaction->subscriptionMyId);
+								} else {
+									$parcela->subscriptionMyId		        = "";
+								}
+								if (isset($transaction->payedOutsideGalaxPay))
+								{
+									$parcela->payedOutsideGalaxPay	        = $transaction->payedOutsideGalaxPay;
+								} else {
+									$parcela->payedOutsideGalaxPay	        = false;
+								}
+								if ((isset($transaction->datetimeLastSentToOperator)) and (Cas::temData($transaction->datetimeLastSentToOperator)))
+								{
+									$parcela->datetimeLastSentToOperator    = $transaction->datetimeLastSentToOperator;
+								}
+								if (isset($transaction->tid))
+								{
+									$parcela->tid                           = $transaction->tid;
+								}
+								if (isset($transaction->authorizationCode))
+								{
+									$parcela->authorizationCode             = $transaction->authorizationCode;
+								}
+								if (isset($transaction->cardOperatorId))
+								{
+									$parcela->cardOperatorId                = $transaction->cardOperatorId;
+								}
+								if ((isset($transaction->ConciliationOccurrences)) and (is_array($transaction->ConciliationOccurrences)))
+								{
+									$parcela->conciliationOccurrences       = json_encode($transaction->ConciliationOccurrences);
+								}
+								if (isset($transaction->CreditCard))
+								{
+									$parcela->creditCard                    = json_encode($transaction->CreditCard);
+								}
+								if (isset($transaction->reasonDenied))
+								{
+									$parcela->reasonDenied                  = $transaction->reasonDenied;
+								}						
+								if (isset($transaction->Boleto))
+								{
+									if (isset($transaction->Boleto->pdf))
+									{
+										$parcela->boletopdf				    = Cas::nulltoSpace($transaction->Boleto->pdf);
+									} else {
+										$parcela->boletopdf				    = "";
+									}
+									if (isset($transaction->Boleto->bankLine))
+									{
+										$parcela->boletobankLine		    = Cas::nulltoSpace($transaction->Boleto->bankLine);
+									} else {
+										$parcela->boletobankLine		   	= "";
+									}
+									if (isset($transaction->Boleto->bankNumber))
+									{
+										$parcela->boletobankNumber		   	= Cas::nulltoSpace($transaction->Boleto->bankNumber);
+									} else {
+										$parcela->boletobankNumber         	= 0;
+									}
+									if (isset($transaction->Boleto->barCode))
+									{
+										$parcela->boletobarCode			   	= Cas::nulltoSpace($transaction->Boleto->barCode);
+									} else {
+										$parcela->boletobarCode			   	= "";
+									}
+									if (isset($transaction->Boleto->bankEmissor))
+									{
+										$parcela->boletobankEmissor		   	= Cas::nulltoSpace($transaction->Boleto->bankEmissor);
+									} else {
+										$parcela->boletobankEmissor        	= "";
+									}
+									if (isset($transaction->Boleto->bankAgency))
+									{
+										$parcela->boletobankAgency		   	= Cas::nulltoSpace($transaction->Boleto->bankAgency);
+									} else {
+										$parcela->boletobankAgency         	= "";
+									}
+									if (isset($transaction->Boleto->bankAccount))
+									{
+										$parcela->boletobankAccount		   	= Cas::nulltoSpace($transaction->Boleto->bankAccount);
+									} else {
+										$parcela->boletobankAccount        	= "";
+									}
+								} else {
+									$parcela->boletopdf				    	= "";
+									$parcela->boletobankLine		    	= "";
+									$parcela->boletobankNumber		    	= 0;
+									$parcela->boletobarCode			    	= "";
+									$parcela->boletobankEmissor		    	= "";
+									$parcela->boletobankAgency		    	= "";
+									$parcela->boletobankAccount		    	= "";
+								}
+								if (isset($transaction->Pix))
+								{
+									if (isset($transaction->Pix->reference))
+									{
+										$parcela->pixreference			   	= Cas::nulltoSpace($transaction->Pix->reference);
+									} else {
+										$parcela->pixreference			   	= "";
+									}
+									if (isset($transaction->Pix->qrCode))
+									{
+										$parcela->pixqrCode				   	= Cas::nulltoSpace($transaction->Pix->qrCode);
+									} else {
+										$parcela->pixqrCode				   	= "";
+									}
+									if (isset($transaction->Pix->image))
+									{
+										$parcela->piximage				   	= $transaction->Pix->image;
+									} else {
+										$parcela->piximage				   	= "";
+									}
+									if (isset($transaction->Pix->page))
+									{
+										$parcela->pixpage				   	= $transaction->Pix->page;
+									} else {
+										$parcela->pixpage				   	= "";
+									}
+								} else {
+									$parcela->pixreference			     	= "";
+									$parcela->pixqrCode				     	= "";
+									$parcela->piximage				     	= "";
+									$parcela->pixpage				     	= "";
+								}
+								$parcela->save();
+								$transctions[]								= $parcela;
+							} else {
+								$divergencia            		       	 	= new \App\Models\TransacaoDivergencia();
+								$divergencia->transacao_data_id				= $transacao_data_id;
+								$divergencia->parcela_id					= $parcela->id;
+								$divergencia->contrato_id 					= $contrato->id;
+								$divergencia->galaxPayId					= $transaction->galaxPayId;
+								if (isset($transaction->chargeGalaxPayId))
+								{
+									$divergencia->cgalaxPayId				= $transaction->chargeGalaxPayId;
+								}
+								$divergencia->status						= $transaction->status;
+								$divergencia->statusDate					= $transaction->statusDate;
+								$divergencia->statusDescription				= $transaction->statusDescription;
+								$divergencia->additionalInfo				= $transaction->additionalInfo;
+								if (($transaction->status == 'cancelByContract') or ($transaction->status == 'cancel')) 
+								{
+									$divergencia->data_baixa				= substr($transaction->statusDate,0,10);
+									$divergencia->data_pagamento 			= null;
+									$divergencia->situacao 					= 'Inserir Baixa no CRM';
+								} else {
+									$divergencia->data_pagamento			= substr($transaction->paydayDate,0,10);
+									$divergencia->data_baixa				= null;
+									$divergencia->situacao 					= 'Inserir Pagamento no CRM';
+								}
+								$divergencia->value 						= ($transaction->value / 100);
+								$divergencia->payday						= $transaction->payday;
+								$divergencia->transacao 					= json_encode($transaction);
+								$divergencia->save();
+								$transctions[]								= $divergencia;
+							}
+						} else {
+							
+							switch ($transaction->status) 
+							{
+								case 'captured':
+								case 'payedBoleto':
+								case 'payExternal':
+								case 'payedPix':
+									$data_pagamento									= $parcela->data_pagamento;
+									if  ($parcela->data_pagamento != substr($transaction->paydayDate,0,10))
+									{
+										if ($atualizar ==='S')
+										{						
+											$parcela->data_pagamento		    		= substr($transaction->paydayDate,0,10);
+											$parcela->statusDate			    		= $transaction->statusDate;
+											$parcela->statusDescription					= $transaction->statusDescription;
+											$parcela->additionalInfo					= $transaction->additionalInfo;
+											$parcela->galaxPayId			        	= $transaction->galaxPayId;
+												 
+											if (isset($transaction->chargeGalaxPayId))
+											{
+												$parcela->cgalaxPayId			    	= $transaction->chargeGalaxPayId;
+											}
+											
+											if (isset($transaction->payedOutsideGalaxPay))
+											{
+												$parcela->payedOutsideGalaxPay	 		= $transaction->payedOutsideGalaxPay;
+											 } else {
+												$parcela->payedOutsideGalaxPay			= false;
+											 }
+											 Log::info("nova_pagar", ['parcela_id' 		=> $parcela->id ]);
+											 Log::info("nova_pagar", ['data_pagamento' 	=> $data_pagamento ]);
+											 Log::info("nova_pagar", ['paydayDate' 		=> substr($transaction->paydayDate,0,10) ]);
+											 $transctions[]								= $parcela;
+											 $parcela->save();
+										} else {
+											$divergencia            		        	= new \App\Models\TransacaoDivergencia();
+											$divergencia->transacao_data_id				= $transacao_data_id;
+											$divergencia->parcela_id					= $parcela->id;
+											$divergencia->contrato_id 					= $parcela->contrato_id;
+											$divergencia->galaxPayId					= $transaction->galaxPayId;
+											if (isset($transaction->chargeGalaxPayId))
+											{
+												$divergencia->cgalaxPayId				= $transaction->chargeGalaxPayId;
+											}
+											$divergencia->status						= $transaction->status;
+											$divergencia->value 						= ($transaction->value / 100);
+											$divergencia->payday						= $transaction->payday;
+											$divergencia->statusDate					= $transaction->statusDate;
+											$divergencia->statusDescription				= $transaction->statusDescription;
+											$divergencia->additionalInfo				= $transaction->additionalInfo;
+											$divergencia->data_pagamento				= substr($transaction->paydayDate,0,10);
+											$divergencia->data_baixa					= null;
+											$divergencia->situacao 						= 'Atualizar Pagamento CRM';
+											$divergencia->transacao 					= null; 
+											$divergencia->save();
+											$transctions[]								= $divergencia;
+										}
+									}
+									break;
+								case 'cancelByContract':
+								case 'cancel':
+									/* aqui é necessário verificar se tem mais de uma cobrança na mesma data de vencimento */
+									if  ($parcela->data_baixa != substr($transaction->statusDate,0,10))
+									{
+										$permite 									= 'N';
+										try {
+											$resultado = CelCash::listarTransacoesVencimento(
+												$transaction->payday,
+												$transaction->payday,
+												$customerGalaxPayId
+											);
+											if ((isset($resultado->totalQtdFoundInPage)) and ($resultado->totalQtdFoundInPage > 0)) 
+											{	
+												foreach ($resultado->Transactions as $ctransaction) 
+												{
+													if (($transaction->galaxPayId == $ctransaction->galaxPayId) and ($transaction->status == $ctransaction->status))
+													{
+														$permite 					= 'S';
+													}
+												}
+											}
+										} catch (\Exception $e) {
+											\Log::error('Erro no processamento de listarTransacoesVencimento', [
+												'payday' 			=> $transaction->payday,
+												'customerGalaxPayId'=> $customerGalaxPayId
+											]);
+										}
+										if ($permite == 'S')
+										{
+											Log::info("nova_cancelar", ['parcela_id' => $parcela->id ]);
+											
+											 if ($atualizar ==='S')
+											{
+												$parcela->data_baixa		   	 			= substr($transaction->statusDate,0,10);
+												$parcela->statusDate			    		= $transaction->statusDate;
+												$parcela->statusDescription					= $transaction->statusDescription;
+												$parcela->save();
+												$transctions[]								= $parcela;
+											} else {
+												$divergencia            		       	 	= new \App\Models\TransacaoDivergencia();
+												$divergencia->transacao_data_id				= $transacao_data_id;
+												$divergencia->parcela_id					= $parcela->id;
+												$divergencia->contrato_id 					= $parcela->contrato_id;
+												$divergencia->galaxPayId					= $transaction->galaxPayId;
+												if (isset($transaction->chargeGalaxPayId))
+												{
+													$divergencia->cgalaxPayId				= $transaction->chargeGalaxPayId;
+												}
+												$divergencia->status						= $transaction->status;
+												$divergencia->value 						= ($transaction->value / 100);
+												$divergencia->payday						= $transaction->payday;
+												$divergencia->statusDate					= $transaction->statusDate;
+												$divergencia->statusDescription				= $transaction->statusDescription;
+												$divergencia->additionalInfo				= $transaction->additionalInfo;
+												$divergencia->data_pagamento				= null;
+												$divergencia->data_baixa					= substr($transaction->statusDate,0,10);
+												$divergencia->situacao 						= 'Atualizar Baixa CRM';
+												$divergencia->transacao 					= null; 
+												$divergencia->save();
+												$transctions[]								= $divergencia;
+											}
+										}
+									}
+									break;
+							}
+						}
+					} else {
+						Cas::transacaoNencontrada($transaction);
+					}
+					
+				} else {
+					Cas::transacaoNencontrada($transaction);
+				}
+			}
+		}
+		return $transctions;
+	}
+	
+	private static function transacaoNencontrada($transaction)
+	{
+		 Log::info("nencontrada", ['transaction' => $transaction ]);
+	}
+	
+	public static function atualizarTransaction($transactions,$transacao_data_id,$atualizar='N')
+	{
+		$atualizados 												    = array();
+		if (is_array($transactions))
+		{
+			foreach ($transactions as $transaction) 
+			{
+				$atualizado												= Cas::atualizarCriarParcela($transaction,Cas::obterParcelaComo($transaction,Cas::obterComo($transaction)),$transacao_data_id,$atualizar);
+				if (count($atualizado) > 0)
+				{
+					$atualizados[]										= $atualizado;
+				}
+			}
+		}
+		
+		return $atualizados;
+	}
+	
+	public static function listarTransacoesStatus($payload)
+	{
+		
+		if (!isset($payload->atualizar))
+		{
+			$payload->atualizar											= 'N';
+		}
+		
+		if ($payload->atualizar === 'N')
+		{
+			$transacaoDataIds 											= \App\Models\TransacaoData::whereBetween('data', [$payload->updateStatusFrom,$payload->updateStatusTo])->pluck('id')->toArray();
+			// Segundo: Excluir TransacaoDivergencia relacionadas às TransacaoData do período
+			$deletedDivergenciasCount = 0;
+			
+			if (!empty($transacaoDataIds)) 
+			{
+			   $deletedDivergenciasCount 								= \App\Models\TransacaoDivergencia::whereIn('transacao_data_id', $transacaoDataIds)->delete();
+			}
+			// Terceiro: Excluir as TransacaoData do período
+			$deletedTransacaoDataCount 									= \App\Models\TransacaoData::whereBetween('data', [$payload->updateStatusFrom,$payload->updateStatusTo])->delete();
+		}
+		
+		$chave                                                          = $payload->updateStatusFrom . '#' . $payload->updateStatusTo;
+		\Cache::forget($chave);
+		
+		if (\Cache::has($chave))
+        {
+           $payload->start           									= \Cache::get($chave);
+        } else {
+           $payload->start           									= 0;
+           \Cache::forever($chave,$payload->start);
+        }
+		
+		// Configurações de segurança
+		$maxIteracoes 													= 1000; // Limite máximo de iterações para evitar loop infinito
+		$contadorIteracoes 												= 0;
+		$totalProcessados 												= 0;
+
+		// Inicializar a variável para controle do loop
+		$totalQtdFoundInPage 											= 1; // Começar com valor > 0 para entrar no loop
+
+		// Log de início do processamento
+		\Log::info('Iniciando processamento de transações', [
+			'updateStatusFrom' 	=> $payload->updateStatusFrom,
+			'updateStatusTo' 	=> $payload->updateStatusTo,
+			'start' 			=> $payload->start,
+			'limite' 			=> $payload->limite
+		]);
+
+		$transacaoData 													= \App\Models\TransacaoData::firstOrNew(['data' => $payload->updateStatusFrom]);
+
+		if (!$transacaoData->exists) 
+		{
+			$transacaoData->total       								= 0;
+			$transacaoData->conciliados 								= 0;
+			$transacaoData->divergentes 								= 0;
+		}
+
+		$transacaoData->status 											= 'processando';
+		$transacaoData->save();
+		
+		while ($totalQtdFoundInPage > 0 && $contadorIteracoes < $maxIteracoes) 
+		{
+			$contadorIteracoes++;
+			
+			try {
+				$resultado = CelCash::listarTransacoesStatus(
+					$payload->updateStatusFrom,
+					$payload->updateStatusTo,
+					$payload->start,
+					$payload->limite
+				);
+				
+				$totalQtdFoundInPage 									= 0;
+				
+				if (isset($resultado->totalQtdFoundInPage)) 
+				{
+					if (isset($resultado->Transactions)) 
+					{
+						if (($resultado->totalQtdFoundInPage > 0) && (count($resultado->Transactions) > 0)) 
+						{
+							$atualizados 								= Cas::atualizarTransaction($resultado->Transactions,$transacaoData->id,$payload->atualizar);
+							$totalProcessados 							+= count($resultado->Transactions);
+							if ($payload->atualizar === 'N')
+							{
+								$transacaoData->total 					+= $resultado->totalQtdFoundInPage;
+								$transacaoData->save();
+							}
+							// Log de progresso
+							\Log::info("Iteração {$contadorIteracoes}: {$resultado->totalQtdFoundInPage} transações encontradas, " . count($resultado->Transactions) . " processadas");
+						}
+					}
+					
+					$totalQtdFoundInPage 								= $resultado->totalQtdFoundInPage;
+					
+					$payload->start 									= $payload->start + $resultado->totalQtdFoundInPage;
+					\Cache::forever($chave, $payload->start);
+				}
+				
+				// Delay para não sobrecarregar o sistema
+				usleep(200000); // 200ms
+				
+			} catch (\Exception $e) {
+				\Log::error('Erro no processamento de transações', [
+					'iteracao' 		=> $contadorIteracoes,
+					'start' 		=> $payload->start,
+					'erro' 			=> $e->getMessage(),
+					'trace' 		=> $e->getTraceAsString()
+				]);
+				
+				// Em caso de erro, interromper o loop para evitar problemas
+				break;
+			}
+		}
+
+		// Log final do processamento
+		if ($contadorIteracoes >= $maxIteracoes) {
+			\Log::warning('Processamento interrompido por atingir o limite máximo de iterações', [
+				'maxIteracoes' 		=> $maxIteracoes,
+				'totalProcessados' 	=> $totalProcessados,
+				'ultimoStart' 		=> $payload->start
+			]);
+		} else {
+			\Log::info('Processamento concluído com sucesso', [
+				'iteracoes' 		=> $contadorIteracoes,
+				'totalProcessados' 	=> $totalProcessados,
+				'startFinal' 		=> $payload->start
+			]);
+		}
+		
+		if ($payload->atualizar === 'N')
+		{
+			$qtdivergentes 												= \App\Models\TransacaoDivergencia::where('transacao_data_id', '=',$transacaoData->id)->count();
+			$transacaoData->divergentes 								= $qtdivergentes;
+			$transacaoData->conciliados									= $transacaoData->total - $qtdivergentes;
+			$transacaoData->status 										= 'finalizado';
+			$transacaoData->save();
+		}
+		\Cache::forget($chave);
+		return $payload;
+	}
+	
+	public static function atualizarDivergencia($id)
+	{
+		$divergencia					= \App\Models\TransacaoDivergencia::find($id);
+		
+		if (isset($divergencia->id))
+		{
+			
+			switch ($divergencia->situacao) 
+			{
+				case 'Inserir Baixa no CRM':
+				case 'Inserir Pagamento no CRM':
+			 	
+					$parcela 			= \App\Models\Parcela::where('contrato_id','=',$divergencia->contrato_id)
+															 ->where('data_vencimento','=',$divergencia->payday)
+															 ->first();
+                                                                  
+					if (isset($parcela->id))
+					{
+					}
+					break;
+					
+			    case 'Atualizar Pagamento CRM':
+					$parcela 			= \App\Models\Parcela::find($divergencia->parcela_id);
+                                                                  
+					if (isset($parcela->id))
+					{
+						if (is_null($parcela->data_pagamento))
+						{
+							$parcela->status 			= $divergencia->status;
+							$parcela->data_pagamento	= $parcela->data_pagamento;
+							$parcela->data_baixa		= null;
+							if ($parcela->save())
+							{
+								$divergencia->delete();
+								return 'Atualizado para pagamento';
+							}
+						} else {
+							$divergencia->delete();
+							return 'Já havia atualizado para pagamento';
+						}							
+					}
+					break;
+				case 'Atualizar Baixa CRM':
+				
+					$parcela 							= \App\Models\Parcela::find($divergencia->parcela_id);
+                                                                  
+					if (isset($parcela->id))
+					{
+						if ((is_null($parcela->data_baixa)) and (is_null($parcela->data_pagamento)))
+						{
+							$parcela->status 			= $divergencia->status;
+							$parcela->data_baixa		= $divergencia->data_baixa;
+							if ($parcela->save())
+							{
+								$divergencia->delete();
+								return 'Atualizado para baixado';
+							}
+						} else {
+							$divergencia->delete();
+							return 'Já havia seido atualizado para baixado';
+						}							
+					}
+					break;
+			}
+		}
+		
+		return 'Não foi atualizado a divergencia!';
+	}
+	
+	public static function obterDadosBeneficiario($cpf)
+	{
+		$retorno 					= new stdClass();
+		$retorno->id 				= 0;
+		$retorno->cpf 				= "";
+		$retorno->nome 				= "";
+		$retorno->idade 			= 0;
+		$retorno->email 			= "";
+		$retorno->tipo 				= "";
+		$retorno->cliente_id 		= 0;
+		$retorno->plano_id 			= 0;
+		$retorno->qtdedep			= 0;
+		$retorno->patientholderid	= 0;
+		$retorno->situacao 			= "";
+		$retorno->dependentes 		= array();
+		
+		$cpf						= preg_replace('/[^0-9]/', '', $cpf);
+		$cpf 						= str_pad($cpf, 11, "0", STR_PAD_LEFT);	
+		
+		$cliente                 	= \App\Models\Cliente::select('id','nome','user_id','data_nascimento','saldo')
+												->where('cpfcnpj','=',$cpf)
+												->where('tipo','=','F')
+												->first();
+													  
+		if (!isset($cliente->id)) 
+		{
+			$retorno->situacao 		= "C";
+            return $retorno;
+        }											  
+		
+		$retorno->cliente_id		= $cliente->id;
+		$retorno->cpf				= $cpf;
+		$retorno->nome				= $cliente->nome;
+		$retorno->email				= $cliente->email;
+		
+		if ($cliente->saldo > 0)
+		{
+			$retorno->saldo 		= "R$ " . str_replace('.',',',$cliente->saldo);
+		} else {
+			$retorno->saldo			= "";
+		}
+		
+		$beneficiario 				= \App\Models\Beneficiario::with('contrato')
+												->where('cliente_id', '=', $cliente->id)
+												->where('ativo', '=', 1)
+												->whereHas('contrato', function ($query) {
+													$query->whereIn('status', array('active','waitingPayment'));
+												})
+												->first();
+												
+		if (!isset($beneficiario->id)) 
+		{
+			$retorno->situacao 		= "B";
+			return $retorno;
+		}
+		
+		$retorno->tipo				= $beneficiario->tipo;
+		if ((!isset($beneficiario->contrato->status)) or (($beneficiario->contrato->status !='active') and ($beneficiario->contrato->status !='waitingPayment')))
+		{
+			$retorno->situacao 		= "B";
+			return $retorno;
+		}
+		
+		$retorno->id 				= $beneficiario->id;
+		$retorno->idade 			= Carbon::createFromDate($cliente->data_nascimento)->age; 
+		if (isset($beneficiario->contrato->situacao_pagto))
+		{
+			$retorno->situacao		= $beneficiario->contrato->situacao_pagto;
+		} else {
+			$retorno->situacao		= "I";
+		}
+		
+		$beneficiarioproduto  		= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario->id)
+																	 ->where('produto_id','=',4)
+																	 ->first();		
+		if (isset($beneficiarioproduto->id))
+		{
+			$retorno->patientholderid = $beneficiarioproduto->idintegracao;
+		}				
+		
+		if ($beneficiario->contrato->tipo == 'F')
+		{	
+			$retorno->plano_id      = $beneficiario->contrato->plano_id;
+			$dependentes 			= \App\Models\Beneficiario::with('cliente','parentesco')
+												  ->where('contrato_id','=',$beneficiario->contrato_id)
+												  ->where('tipo','=','D')
+												  ->where('ativo','=',1)
+												  ->get();
+		} else {
+			
+			$retorno->situacao		= "A";
+			$parcela 				= \App\Models\Parcela::where('contrato_id','=',$beneficiario->contrato_id)
+														 ->where('data_pagamento','=',null)
+														 ->where('data_baixa','=',null)
+														 ->where('data_vencimento','<',date('Y-m-d'))
+														 ->orderBy('data_vencimento','asc')
+														 ->first();
+			if (isset($parcela->id))
+			{
+				$date 								= $parcela->data_vencimento. " 23:59:59";
+				$vencimento 						= Carbon::createFromDate($date);
+				$now 								= Carbon::now();
+				$diferenca 							= $vencimento->diffInDays($now);
+					
+				if ($diferenca >= 9)
+				{
+					$retorno->situacao				= 'I';
+				}
+			}
+		
+			$retorno->plano_id      = $beneficiario->plano_id;
+			$dependentes 		    = \App\Models\Beneficiario::with('cliente','parentesco')
+												  ->where('parent_id','=',$beneficiario->id)
+												  ->where('tipo','=','D')
+												  ->where('ativo','=',1)
+												  ->get();
+		}
+		
+		
+		$sql 						= "SELECT id, titulo as nome, integracao FROM produtos where ativo=1 order by sequencia";
+		$lprodutos					= DB::select($sql);
+		$produtos 					= array();
+		
+		foreach ($lprodutos as $produto)
+		{
+				
+			$planoproduto  			= \App\Models\PlanoProduto::where('plano_id','=',$retorno->plano_id)
+															  ->where('produto_id','=',$produto->id)
+															  ->whereIn('beneficiario',array('A',$beneficiario->tipo))
+															  ->first();
+			if (isset($planoproduto->id))
+			{
+				$registro 				= new stdClass();
+				$registro->id 			= $produto->id; 
+				$registro->nome 		= $produto->nome; 
+				$registro->integra 		= $produto->integracao; 
+				$registro->ativo 		= 1;
+				if ($produto->integracao == 1)
+				{
+					$registro->ativo 	= 0;
+					$beneficiarioproduto= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$beneficiario->id)
+																		 ->where('produto_id','=',$produto->id)
+																		 ->first();		
+					if (isset($beneficiarioproduto->id))
+					{
+						$registro->ativo = $beneficiarioproduto->ativacao;
+					}		
+				}
+				$produtos[] 		= $registro;
+			}
+		}
+		
+		if ($beneficiario->tipo == 'T')
+		{
+			
+			$plano              				= \App\Models\Plano::select('id','qtde_beneficiarios')->find($retorno->plano_id);
+					
+			if (isset($plano->id))
+			{
+				if ($plano->qtde_beneficiarios > 1)
+				{
+					if ($beneficiario->contrato->tipo == 'F')
+					{
+						$qtde_dependentes 		= \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
+																		  ->where('tipo','=','D')
+																		  ->where('desc_status','=','ATIVO')
+																		  ->count();
+					} else {
+						$qtde_dependentes 		= \App\Models\Beneficiario::where('parent_id','=',$beneficiario->id)
+																		  ->where('tipo','=','D')
+																		  ->where('desc_status','=','ATIVO')
+																		  ->count();
+					}
+					$retorno->qtdedep 			= ($plano->qtde_beneficiarios - $qtde_dependentes) -1;
+				}
+			}
+		  
+		
+			foreach ($dependentes as $dependente)
+			{
+				$registro 					= new stdClass();
+				$registro->id 				= $dependente->id; 
+				$registro->cpf 				= $dependente->cliente->cpfcnpj; 
+				$registro->nome 			= $dependente->cliente->nome; 
+				$registro->idade 			= Carbon::createFromDate($dependente->cliente->data_nascimento)->age; 
+				$registro->parentesco 		= $dependente->parentesco->nome; 
+				$registro->cliente_id 		= $dependente->cliente_id;
+				 
+				$beneficiarioproduto  		= \App\Models\BeneficiarioProduto::where('beneficiario_id','=',$dependente->id)
+																			 ->where('produto_id','=',4)
+																			 ->first();		
+				if (isset($beneficiarioproduto->id))
+				{
+					$registro->patientholderid = $beneficiarioproduto->idintegracao;
+				} else {
+					$registro->patientholderid = 0;
+				}				
+			
+				$retorno->dependentes[]		= $registro;
+			}
+		}
+		
+		$retorno->produtos 					= $produtos;
+		return $retorno;
+	}
+	
+	public static function stripPrefix(string $value, string $prefix): string
+    {
+        return str_starts_with($value, $prefix) ? substr($value, strlen($prefix)) : $value;
+    }
+}
