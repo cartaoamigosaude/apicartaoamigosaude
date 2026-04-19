@@ -52,6 +52,10 @@ return [
     */
     'celcash' => [
         'api_url' => env('CELCASH_API_URL', 'https://api-celcash.celcoin.com.br/v2'),
+        'sync_enabled' => env('CELCASH_SYNC_ENABLED', true),
+        'sync_atualizar' => env('CELCASH_SYNC_ATUALIZAR', 'S'),
+        'sync_days_frequent' => env('CELCASH_SYNC_DAYS_FREQUENT', 0),
+        'sync_days_hourly' => env('CELCASH_SYNC_DAYS_HOURLY', 3),
     ],
 
     'chathot' => [
@@ -59,12 +63,12 @@ return [
     ],
 
     'conexa' => [
-        'api_url'     => env('CONEXA_API_URL', 'https://api.conexasaude.com.br'),
+        'api_url' => env('CONEXA_API_URL', 'https://api.conexasaude.com.br'),
         'api_url_hml' => env('CONEXA_API_URL_HML', 'https://hml-api.conexasaude.com.br'),
     ],
 
     'sabemi' => [
-        'api_url'     => env('SABEMI_API_URL', 'https://universoseguros.sabemi.com.br/SabemiWebApiV2'),
+        'api_url' => env('SABEMI_API_URL', 'https://universoseguros.sabemi.com.br/SabemiWebApiV2'),
         'api_url_hml' => env('SABEMI_API_URL_HML', 'https://universoseguros.sabemi.com.br/SabemiHomologWebApiV2'),
     ],
 
@@ -73,7 +77,7 @@ return [
     ],
 
     'cartao_tem' => [
-        'api_url'      => env('CARTAO_TEM_API_URL', 'https://api.tempravoce.com'),
+        'api_url' => env('CARTAO_TEM_API_URL', 'https://api.tempravoce.com'),
         'api_url_auth' => env('CARTAO_TEM_AUTH_URL', 'https://api.dd.meutem.com.br'),
     ],
 
