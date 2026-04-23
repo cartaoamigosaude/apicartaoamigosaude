@@ -55,6 +55,15 @@ class CelCashChargeService
             return $retorno;
         }
 
+        if (! is_object($response)) {
+            $retorno->error = true;
+            $retorno->statcode = $statcode;
+            $retorno->message = 'Resposta vazia ou inválida da API CelCash (charges GET)';
+            $retorno->endpoint = $endpoint;
+
+            return $retorno;
+        }
+
         $response->statcode             = $statcode;
         $response->endpoint             = $endpoint;
 		$response->token             	= $token->token;
