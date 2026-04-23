@@ -1991,6 +1991,12 @@ class ContratoController extends Controller
             return response()->json(['error' => 'Contrato ainda não foi assinado ou PDF não disponível'], 404);
         }
 
+        // Verifica se é uma URL externa (CelCash, por exemplo)
+        if (filter_var($contrato->contractpdf, FILTER_VALIDATE_URL)) {
+            return redirect()->away($contrato->contractpdf);
+        }
+
+        // Se não for uma URL externa, assume que é um caminho local
         // Extrair o caminho relativo da URL armazenada (ex: /uploads/contratos/8577abc.pdf)
         $urlPath = parse_url($contrato->contractpdf, PHP_URL_PATH);
         $filePath = public_path($urlPath);
