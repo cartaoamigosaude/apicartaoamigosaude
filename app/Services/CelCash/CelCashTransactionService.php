@@ -31,6 +31,7 @@ class CelCashTransactionService
 
         $endpoint                       = $token->url . "/transactions?$query";
 		$statcode						= "";
+        $retorno                         = new stdClass();
 		
         try {
             $hresponse                  = Http::withHeaders([
@@ -43,19 +44,30 @@ class CelCashTransactionService
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         } catch (RequestException $e) {
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         }
 
 		//Log::info("getTransaction", ['response' => $response ]);
 
-        $retorno                       	= $response;
-		$retorno->statcode              = $statcode;
-        return $retorno;
+        if (! is_object($response)) {
+            $retorno->error = true;
+            $retorno->statcode = $statcode;
+            $retorno->mensagem = 'Resposta vazia ou inválida da API CelCash (transactions GET)';
+            $retorno->endpoint = $endpoint;
+
+            return $retorno;
+        }
+
+        $response->statcode              = $statcode;
+        $response->endpoint              = $endpoint;
+        return $response;
 		
 	}
 
@@ -70,6 +82,7 @@ class CelCashTransactionService
         }
 
         $endpoint                       = $token->url . "/transactions/$id/$typeId";
+        $retorno                        = new stdClass();
      
         try {
             $hresponse                  = Http::withHeaders([
@@ -82,19 +95,30 @@ class CelCashTransactionService
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         } catch (RequestException $e) {
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         }
 
 		//Log::info("alterarTransaction", ['response' => $response ]);
 	
-        $retorno                       	= $response;
-		$retorno->statcode              = $statcode;
-        return $retorno;
+        if (! is_object($response)) {
+            $retorno->error = true;
+            $retorno->statcode = $statcode;
+            $retorno->mensagem = 'Resposta vazia ou inválida da API CelCash (transactions PUT)';
+            $retorno->endpoint = $endpoint;
+
+            return $retorno;
+        }
+
+        $response->statcode              = $statcode;
+        $response->endpoint              = $endpoint;
+        return $response;
 		
 	}
 
@@ -109,6 +133,7 @@ class CelCashTransactionService
         }
 
         $endpoint                       = $token->url . "/transactions/$id/$typeId/add";
+        $retorno                        = new stdClass();
      
         try {
             $hresponse                  = Http::withHeaders([
@@ -121,19 +146,30 @@ class CelCashTransactionService
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         } catch (RequestException $e) {
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         }
 
 		//Log::info("adicionarTransaction", ['response' => $response ]);
 
-        $retorno                       	= $response;
-		$retorno->statcode              = $statcode;
-        return $retorno;
+        if (! is_object($response)) {
+            $retorno->error = true;
+            $retorno->statcode = $statcode;
+            $retorno->mensagem = 'Resposta vazia ou inválida da API CelCash (transactions POST add)';
+            $retorno->endpoint = $endpoint;
+
+            return $retorno;
+        }
+
+        $response->statcode              = $statcode;
+        $response->endpoint              = $endpoint;
+        return $response;
 		
 	}
 
@@ -148,6 +184,7 @@ class CelCashTransactionService
         }
 
         $endpoint                       = $token->url . "/transactions/$id/$typeId";
+        $retorno                        = new stdClass();
      
         try {
             $hresponse                  = Http::withHeaders([
@@ -160,11 +197,22 @@ class CelCashTransactionService
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
             return $retorno;
         } catch (RequestException $e) {
             $retorno->error 			= true;
             $retorno->statcode			= 500;
             $retorno->mensagem 			= $e;
+            $retorno->endpoint          = $endpoint;
+            return $retorno;
+        }
+
+        if (! is_object($response)) {
+            $retorno->error = true;
+            $retorno->statcode = $statcode;
+            $retorno->mensagem = 'Resposta vazia ou inválida da API CelCash (transactions DELETE)';
+            $retorno->endpoint = $endpoint;
+
             return $retorno;
         }
 
@@ -174,9 +222,8 @@ class CelCashTransactionService
 		
 		//Log::info("cancelTransaction", ['response' => $response ]);
 
-        $retorno                       	= $response;
-		$retorno->statcode              = $statcode;
-        return $retorno;
+		$response->statcode              = $statcode;
+        return $response;
 		
 	}
 
