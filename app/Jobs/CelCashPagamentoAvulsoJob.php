@@ -22,7 +22,7 @@ class CelCashPagamentoAvulsoJob implements ShouldQueue, ShouldBeUnique
      * @return void
      */
     public $tries 						= 1;
-    public $timeout 					= 300; // 5 minutos
+    public $timeout 					= 1200; // 20 minutos
 	public $failOnTimeout 				= true;
 	public $uniqueFor 					= 3600; // 1 hora
 	
