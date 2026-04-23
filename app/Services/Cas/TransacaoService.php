@@ -191,7 +191,7 @@ class TransacaoService
                                     $aparcela->data_pagamento = substr($transaction->paydayDate, 0, 10);
                                     $aparcela->statusDate = $transaction->statusDate;
                                     $aparcela->statusDescription = $transaction->statusDescription;
-                                    $aparcela->additionalInfo = $transaction->additionalInfo;
+                                    $aparcela->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                     $aparcela->galaxPayId = $transaction->galaxPayId;
 
                                     if (isset($transaction->chargeGalaxPayId)) {
@@ -230,7 +230,7 @@ class TransacaoService
                                     $divergencia->payday = $transaction->payday;
                                     $divergencia->statusDate = $transaction->statusDate;
                                     $divergencia->statusDescription = $transaction->statusDescription;
-                                    $divergencia->additionalInfo = $transaction->additionalInfo;
+                                    $divergencia->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                     $divergencia->data_pagamento = substr($transaction->paydayDate, 0, 10);
                                     $divergencia->data_baixa = null;
                                     $divergencia->situacao = 'Atualizar Pagamento CRM';
@@ -334,7 +334,7 @@ class TransacaoService
                                             $divergencia->payday = $transaction->payday;
                                             $divergencia->statusDate = $transaction->statusDate;
                                             $divergencia->statusDescription = $transaction->statusDescription;
-                                            $divergencia->additionalInfo = $transaction->additionalInfo;
+                                            $divergencia->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                             $divergencia->data_pagamento = null;
                                             $divergencia->data_baixa = substr($transaction->statusDate, 0, 10);
                                             $divergencia->situacao = 'Atualizar Baixa CRM';
@@ -558,7 +558,7 @@ class TransacaoService
                                 $divergencia->status = $transaction->status;
                                 $divergencia->statusDate = $transaction->statusDate;
                                 $divergencia->statusDescription = $transaction->statusDescription;
-                                $divergencia->additionalInfo = $transaction->additionalInfo;
+                                $divergencia->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                 if (($transaction->status == 'cancelByContract') or ($transaction->status == 'cancel')) {
                                     $divergencia->data_baixa = substr($transaction->statusDate, 0, 10);
                                     $divergencia->data_pagamento = null;
@@ -594,7 +594,7 @@ class TransacaoService
                                             $parcela->data_pagamento = substr($transaction->paydayDate, 0, 10);
                                             $parcela->statusDate = $transaction->statusDate;
                                             $parcela->statusDescription = $transaction->statusDescription;
-                                            $parcela->additionalInfo = $transaction->additionalInfo;
+                                            $parcela->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                             $parcela->galaxPayId = $transaction->galaxPayId;
 
                                             if (isset($transaction->chargeGalaxPayId)) {
@@ -636,7 +636,7 @@ class TransacaoService
                                             $divergencia->payday = $transaction->payday;
                                             $divergencia->statusDate = $transaction->statusDate;
                                             $divergencia->statusDescription = $transaction->statusDescription;
-                                            $divergencia->additionalInfo = $transaction->additionalInfo;
+                                            $divergencia->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                             $divergencia->data_pagamento = substr($transaction->paydayDate, 0, 10);
                                             $divergencia->data_baixa = null;
                                             $divergencia->situacao = 'Atualizar Pagamento CRM';
@@ -717,7 +717,7 @@ class TransacaoService
                                                 $divergencia->payday = $transaction->payday;
                                                 $divergencia->statusDate = $transaction->statusDate;
                                                 $divergencia->statusDescription = $transaction->statusDescription;
-                                                $divergencia->additionalInfo = $transaction->additionalInfo;
+                                                $divergencia->additionalInfo = Cas::nulltoSpace($transaction->additionalInfo);
                                                 $divergencia->data_pagamento = null;
                                                 $divergencia->data_baixa = substr($transaction->statusDate, 0, 10);
                                                 $divergencia->situacao = 'Atualizar Baixa CRM';
