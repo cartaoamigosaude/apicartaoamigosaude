@@ -164,6 +164,17 @@ class CelCashConciliacaoService
 
         $parcela = Parcela::with('contrato')->find($id);
 
+        if (! isset($parcela->id)) {
+            $retorno->status = 404;
+            $retorno->erro = true;
+            $retorno->mensagem = 'Dados da parcela nao encontrado';
+
+            return $retorno;
+        }
+
+        $parcela->ultima_consulta_celcash_at = now();
+        $parcela->save();
+
         $query = 'startAt=0&limit=100&';
 
         if (($parcela->contrato->tipo == 'J') or ($parcela->contrato->avulso == 'S')) {
