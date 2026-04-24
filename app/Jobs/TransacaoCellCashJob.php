@@ -48,12 +48,13 @@ class TransacaoCellCashJob implements ShouldQueue, ShouldBeUnique
 		Log::info("transacao-cellcash-job", ['resultado ' => $resultado  ]);
 		// Obtém divergencias 
 		$divergencias 					= DB::connection('mysql')
-										  ->table('transacoes_divergencias')
-										  ->select('transacoes_divergencias.id')
-										  ->whereBetween('transacoes_data.data', [$dataInicio, $dataFim])
-										  ->orderBy('transacoes_divergencias.id','asc')
-										  ->get();
-		
+											->table('transacoes_divergencias')
+											->join('transacoes_data', 'transacoes_data.id', '=', 'transacoes_divergencias.transacao_data_id')
+											->select('transacoes_divergencias.id')
+											->whereBetween('transacoes_data.data', [$dataInicio, $dataFim])
+											->orderBy('transacoes_divergencias.id', 'asc')
+											->get();
+											
 		$mensagens 						= array();
 		
 		foreach ($divergencias as $divergencia) 
