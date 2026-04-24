@@ -153,6 +153,7 @@ class CelCashBoletoService
         $sql .= " 	AND c.avulso = 'S'";
         $sql .= " 	AND c.status in ('active','waitingPayment')";
         $sql .= ' ORDER BY p.data_vencimento ASC';
+        $sql .= ' LIMIT 200';
 
         $vencidas = DB::connection('mysql')->select($sql);
 
@@ -168,6 +169,7 @@ class CelCashBoletoService
         $sql .= " 	AND c.tipo = 'J'";
         $sql .= " 	AND c.status in ('active','waitingPayment')";
         $sql .= ' ORDER BY p.data_vencimento ASC';
+        $sql .= ' LIMIT 200';
 
         $vencidas = DB::connection('mysql')->select($sql);
 
