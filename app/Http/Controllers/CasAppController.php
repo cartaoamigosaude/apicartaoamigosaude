@@ -943,7 +943,7 @@ class CasAppController extends Controller
 			}
 		} 
 		
-        $validator = Validator::make($request->all(), [
+		$rules = [
             'nome'          	=> 'required|string|max:100',
             'telefone'      	=> 'required|string|max:15',
 			'sexo'      		=> 'required|string|in:Masculino,Feminino,M,F',
@@ -956,7 +956,15 @@ class CasAppController extends Controller
             'cidade'        	=> 'required|string|max:100',
             'estado'        	=> 'required|string|max:2',
 			'parentesco_id'		=> 'required|exists:parentescos,id'
-        ]);
+        ];
+
+		if ($id == 0)
+		{
+			$rules['beneficiario_id']					= 'required|exists:beneficiarios,id';
+			$rules['cpf']								= 'required|string|max:20';
+		}
+
+        $validator = Validator::make($request->all(), $rules);
     
         if ($validator->fails()) {
             return response()->json(['mensagem' => Cas::getMessageValidTexto($validator->errors())], 422);
@@ -978,6 +986,25 @@ class CasAppController extends Controller
 			{
 				return response()->json(['mensagem' => 'Beneficiário titular não encontrado'], 422);
 			}
+
+			if ($titular->contrato->tipo == 'F')
+			{
+				$plano_id             					= $titular->contrato->plano_id;
+			} else {
+				$plano_id             					= $titular->plano_id;
+			}
+
+			$plano              						= \App\Models\Plano::select('id','qtde_beneficiarios')->find($plano_id);
+
+			if (!isset($plano->id))
+			{
+				return response()->json(['mensagem' => 'Plano do beneficiário titular não encontrado. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
+			}
+
+			if (\App\Models\Plano::limiteDependentes($plano) <= 0)
+			{
+				return response()->json(['mensagem' => 'O plano contratado não permite inserir dependente. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
+			}
 			
 			if ($titular->contrato->tipo == 'F')
 			{
@@ -992,7 +1019,7 @@ class CasAppController extends Controller
 																			  ->count();
 			}
 
-			if ($qtde_dependentes >= ($plano->qtde_beneficiarios - 1))
+			if ($qtde_dependentes >= \App\Models\Plano::limiteDependentes($plano))
 			{
 				return response()->json(['mensagem' => 'Limite de Dependente que o plano permite atingido.'], 422);
 			}
@@ -1046,11 +1073,24 @@ class CasAppController extends Controller
 		{
 			if ($id== 0)
 			{
-				if ($titular->contrato->tipo == 'F')
+				$contrato                              		= \App\Models\Contrato::where('cliente_id','=',$cliente->id)
+																				  ->where('motivo','=','I')
+																				  ->first();
+
+				if (isset($contrato->id))
 				{
-					$plano_id             					= $titular->contrato->plano_id;
-				} else {
-					$plano_id             					= $titular->plano_id;
+					return response()->json(['mensagem' => 'Dependente tem pendência financeira. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
+				}
+
+				$jaexiste                           			= \App\Models\Beneficiario::with('contrato')
+																				  ->where('cliente_id','=',$cliente->id)
+																				  ->first();
+				if (isset($jaexiste->id))
+				{
+					if ((isset($jaexiste->contrato->tipo)) and ($jaexiste->contrato->tipo == 'F'))
+					{
+						return response()->json(['mensagem' => 'O Dependente já está cadastrado no contrato número '. $jaexiste->contrato_id . '. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
+					}
 				}
 		
 				$beneficiario								= new \App\Models\Beneficiario();
@@ -1643,11 +1683,16 @@ class CasAppController extends Controller
             return response()->json(['mensagem' => 'Não autorizado listar beneficiarios.'], 403);
         }
 
-		$beneficiario 		   								= \App\Models\Beneficiario::with('cliente')->find($id);
+		$beneficiario 		   								= \App\Models\Beneficiario::with('cliente','contrato')->find($id);
 		
 		if (!isset($beneficiario->id))
 		{
 			return response()->json(['mensagem' => 'Beneficiário não encontrado. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404 '], 404);
+		}
+
+		if (\App\Models\Plano::dependenteCasTelemedicina($beneficiario))
+		{
+			return response()->json(['mensagem' => 'Dependentes do plano CAS têm acesso apenas à Telemedicina.'], 422);
 		}
 
 		$validator = Validator::make($request->all(), [

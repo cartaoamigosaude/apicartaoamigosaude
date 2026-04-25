@@ -906,7 +906,7 @@ class BeneficiarioService
 			$dependentes 			= \App\Models\Beneficiario::with('cliente','parentesco')
 												  ->where('contrato_id','=',$beneficiario->contrato_id)
 												  ->where('tipo','=','D')
-												  ->where('ativo','=',1)
+												  ->where('desc_status','=','ATIVO')
 												  ->get();
 		} else {
 			
@@ -934,7 +934,7 @@ class BeneficiarioService
 			$dependentes 		    = \App\Models\Beneficiario::with('cliente','parentesco')
 												  ->where('parent_id','=',$beneficiario->id)
 												  ->where('tipo','=','D')
-												  ->where('ativo','=',1)
+												  ->where('desc_status','=','ATIVO')
 												  ->get();
 		}
 		
@@ -979,22 +979,19 @@ class BeneficiarioService
 					
 			if (isset($plano->id))
 			{
-				if ($plano->qtde_beneficiarios > 1)
+				if ($beneficiario->contrato->tipo == 'F')
 				{
-					if ($beneficiario->contrato->tipo == 'F')
-					{
-						$qtde_dependentes 		= \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
-																		  ->where('tipo','=','D')
-																		  ->where('desc_status','=','ATIVO')
-																		  ->count();
-					} else {
-						$qtde_dependentes 		= \App\Models\Beneficiario::where('parent_id','=',$beneficiario->id)
-																		  ->where('tipo','=','D')
-																		  ->where('desc_status','=','ATIVO')
-																		  ->count();
-					}
-					$retorno->qtdedep 			= ($plano->qtde_beneficiarios - $qtde_dependentes) -1;
+					$qtde_dependentes 		= \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->count();
+				} else {
+					$qtde_dependentes 		= \App\Models\Beneficiario::where('parent_id','=',$beneficiario->id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->count();
 				}
+				$retorno->qtdedep 			= \App\Models\Plano::vagasDependentes($plano, $qtde_dependentes);
 			}
 		  
 		

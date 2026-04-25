@@ -43,6 +43,8 @@ return [
     'cas' => [
         'api_url' => env('CAS_API_URL', 'https://api.cartaoamigosaude.com.br'),
         'crm_url' => env('CAS_CRM_URL', 'https://crm.cartaoamigosaude.com.br'),
+        'dependent_plan_ids' => env('CAS_PLANOS_PERMITEM_DEPENDENTES', '15'),
+        'dependent_limit' => env('CAS_QTDE_DEPENDENTES', 4),
     ],
 
     /*

@@ -740,7 +740,7 @@ class ClienteController extends Controller
 				
 			if (isset($plano->id))
 			{
-				$retorno->qtde_beneficiarios  		= ($plano->qtde_beneficiarios - count($retorno->dependentes)) - 1;
+				$retorno->qtde_beneficiarios  		= \App\Models\Plano::vagasDependentes($plano, count($retorno->dependentes));
 			}
 		} else {
 			if ($retorno->tipo == 'D')

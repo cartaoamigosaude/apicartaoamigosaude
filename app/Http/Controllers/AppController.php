@@ -371,23 +371,20 @@ class AppController extends Controller
 					
 			if (isset($plano->id))
 			{
-				if ($plano->qtde_beneficiarios > 1)
+				$retorno->dmensag			= 'Seus dependentes têm acesso a consultas médicas e odontologicas, exames.';
+				if ($beneficiario->contrato->tipo == 'F')
 				{
-					$retorno->dmensag			= 'Seus dependentes têm acesso a consultas médicas e odontologicas, exames.';
-					if ($beneficiario->contrato->tipo == 'F')
-					{
-						$qtde_dependentes 		= \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
-																		  ->where('tipo','=','D')
-																		  ->where('desc_status','=','ATIVO')
-																		  ->count();
-					} else {
-						$qtde_dependentes 		= \App\Models\Beneficiario::where('parent_id','=',$beneficiario->id)
-																		  ->where('tipo','=','D')
-																		  ->where('desc_status','=','ATIVO')
-																		  ->count();
-					}
-					$retorno->qtdedep 			= ($plano->qtde_beneficiarios - $qtde_dependentes) -1;
+					$qtde_dependentes 		= \App\Models\Beneficiario::where('contrato_id','=',$beneficiario->contrato_id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->count();
+				} else {
+					$qtde_dependentes 		= \App\Models\Beneficiario::where('parent_id','=',$beneficiario->id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->count();
 				}
+				$retorno->qtdedep 			= \App\Models\Plano::vagasDependentes($plano, $qtde_dependentes);
 			}
 		} 
 
@@ -627,24 +624,24 @@ class AppController extends Controller
 		{	
 			$plano_id             							= $beneficiario->contrato->plano_id;
 			$dependentes 									= \App\Models\Beneficiario::with('cliente','parentesco')
-																			  ->where('contrato_id','=',$beneficiario->contrato_id)
-																			  ->where('tipo','=','D')
-																			  ->where('ativo','=',1)
-																			  ->get();
+																	  ->where('contrato_id','=',$beneficiario->contrato_id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->get();
 		} else {
 			$plano_id             							= $beneficiario->plano_id;
 			$dependentes 									= \App\Models\Beneficiario::with('cliente','parentesco')
-																			  ->where('parent_id','=',$beneficiario->id)
-																			  ->where('tipo','=','D')
-																			  ->where('ativo','=',1)
-																			  ->get();
+																	  ->where('parent_id','=',$beneficiario->id)
+																	  ->where('tipo','=','D')
+																	  ->where('desc_status','=','ATIVO')
+																	  ->get();
 		}
 
 		$plano              								= \App\Models\Plano::select('id','qtde_beneficiarios')->find($plano_id);
 				
 		if (isset($plano->id))
 		{
-			$retorno->qtde_beneficiarios					= ($plano->qtde_beneficiarios - 1) - count($dependentes);
+			$retorno->qtde_beneficiarios					= \App\Models\Plano::vagasDependentes($plano, count($dependentes));
 		} else {
 			$retorno->qtde_beneficiarios					= 0;
 		}
@@ -859,7 +856,7 @@ class AppController extends Controller
 			return response()->json(['mensagem' => 'Plano do beneficiário titular não encontrado. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
 		}
 
-		if ($plano->qtde_beneficiarios <= 1)
+		if (\App\Models\Plano::limiteDependentes($plano) <= 0)
 		{
 			return response()->json(['mensagem' => 'O plano contratado não permite inserir dependente. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
 		}
@@ -877,7 +874,7 @@ class AppController extends Controller
 															  			  ->count();
 		}
 
-		if ($qtde_dependentes >= ($plano->qtde_beneficiarios - 1))
+		if ($qtde_dependentes >= \App\Models\Plano::limiteDependentes($plano))
 		{
 			return response()->json(['mensagem' => 'Limite de Dependente que o plano permite atingido.'], 422);
 		}
@@ -1146,11 +1143,16 @@ class AppController extends Controller
             return response()->json(['mensagem' => 'Não autorizado listar beneficiarios.'], 403);
         }
 
-		$beneficiario 		   								= \App\Models\Beneficiario::with('cliente')->find($id);
+		$beneficiario 		   								= \App\Models\Beneficiario::with('cliente','contrato')->find($id);
 		
 		if (!isset($beneficiario->id))
 		{
 			return response()->json(['mensagem' => 'Beneficiário não encontrado. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404 '], 404);
+		}
+
+		if (\App\Models\Plano::dependenteCasTelemedicina($beneficiario))
+		{
+			return response()->json(['mensagem' => 'Dependentes do plano CAS têm acesso apenas à Telemedicina.'], 422);
 		}
 
 		$validator = Validator::make($request->all(), [
