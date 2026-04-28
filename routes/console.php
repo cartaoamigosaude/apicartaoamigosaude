@@ -20,7 +20,6 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote')->hourly();
 
 Schedule::command('horizon:snapshot')->everyFiveMinutes();
-Schedule::command('telescope:prune --hours=48')->daily();
 
 /*
 Schedule::job(new \App\Jobs\CancelarContratoParcelaJob())
