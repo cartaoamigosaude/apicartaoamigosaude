@@ -1991,29 +1991,52 @@ class ContratoController extends Controller
             return response()->json(['error' => 'Contrato ainda não foi assinado ou PDF não disponível'], 404);
         }
 
-        // Verifica se é uma URL externa (CelCash, por exemplo)
-        if (filter_var($contrato->contractpdf, FILTER_VALIDATE_URL)) {
-            return redirect()->away($contrato->contractpdf);
-        }
-
-        // Se não for uma URL externa, assume que é um caminho local
-        // Extrair o caminho relativo da URL armazenada (ex: /uploads/contratos/8577abc.pdf)
         $urlPath = parse_url($contrato->contractpdf, PHP_URL_PATH);
-        $filePath = public_path($urlPath);
 
-        if (!file_exists($filePath))
+        if ((!empty($urlPath)) and (Str::startsWith($urlPath, '/uploads/contratos/')))
         {
-            Log::warning("Arquivo PDF do contrato não encontrado no disco", [
-                'contrato_id' => $id,
-                'contractpdf' => $contrato->contractpdf,
-                'filePath' => $filePath
+            $filePath = public_path($urlPath);
+
+            if (!file_exists($filePath))
+            {
+                Log::warning("Arquivo PDF do contrato não encontrado no disco", [
+                    'contrato_id' => $id,
+                    'contractpdf' => $contrato->contractpdf,
+                    'filePath' => $filePath
+                ]);
+                return response()->json(['error' => 'Arquivo PDF do contrato não foi encontrado no servidor. O contrato pode precisar ser assinado novamente.'], 404);
+            }
+
+            return response()->file($filePath, [
+                'Content-Type' => 'application/pdf',
+                'Content-Disposition' => 'inline; filename="contrato-'.$id.'.pdf"',
             ]);
-            return response()->json(['error' => 'Arquivo PDF do contrato não foi encontrado no servidor. O contrato pode precisar ser assinado novamente.'], 404);
         }
 
-        return response()->file($filePath, [
-            'Content-Type' => 'application/pdf',
+        if (filter_var($contrato->contractpdf, FILTER_VALIDATE_URL))
+        {
+            $response = Http::get($contrato->contractpdf);
+
+            if (!$response->successful())
+            {
+                Log::warning("Erro ao buscar PDF externo do contrato", [
+                    'contrato_id' => $id,
+                    'contractpdf' => $contrato->contractpdf,
+                    'status' => $response->status()
+                ]);
+                return response()->json(['error' => 'Não foi possível obter o PDF do contrato. Tente novamente mais tarde.'], 422);
+            }
+
+            return response($response->body(), 200)
+                    ->header('Content-Type', 'application/pdf')
+                    ->header('Content-Disposition', 'inline; filename="contrato-'.$id.'.pdf"');
+        }
+
+        Log::warning("Caminho do PDF do contrato inválido", [
+            'contrato_id' => $id,
+            'contractpdf' => $contrato->contractpdf
         ]);
+        return response()->json(['error' => 'Caminho do PDF do contrato inválido.'], 422);
     }
 	
 	public function cancelar_parcela_beneficiario(Request $request)
