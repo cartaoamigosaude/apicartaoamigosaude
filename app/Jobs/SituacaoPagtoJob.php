@@ -42,7 +42,15 @@ class SituacaoPagtoJob implements ShouldQueue, ShouldBeUnique
                 SELECT
                     p.contrato_id,
                     ROW_NUMBER() OVER (PARTITION BY p.contrato_id ORDER BY p.data_vencimento DESC, p.id DESC) as rn_desc,
-                    ROW_NUMBER() OVER (PARTITION BY p.contrato_id, CASE WHEN p.data_pagamento IS NULL THEN 1 ELSE 0 END ORDER BY p.data_vencimento ASC, p.id ASC) as rn_asc,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY p.contrato_id,
+                        CASE
+                            -- Parcela em aberto para a rotina: sem pagamento e sem baixa.
+                            WHEN p.data_pagamento IS NULL AND p.data_baixa IS NULL THEN 1
+                            ELSE 0
+                        END
+                        ORDER BY p.data_vencimento ASC, p.id ASC
+                    ) as rn_asc,
                     p.data_vencimento,
                     p.data_pagamento
                 FROM parcelas p
