@@ -1045,6 +1045,15 @@ class CasAppController extends Controller
 		list($dia,$mes,$ano)								= explode("/",$request->data_nascimento);
 		$data_nascimento 									= $ano . "-" . $mes . "-". $dia;
 
+		if (($request->parentesco_id == 3) or ($request->parentesco_id == 6))
+		{
+			$idade 				    					= Carbon::createFromDate($data_nascimento)->age;
+			if ($idade > 21)
+			{
+				return response()->json(['mensagem' => 'Irmãos e Netos não podem ser maior que 21 anos'], 404);
+			}
+		}
+
 		if (($request->sexo == 'Masculino') or ($request->sexo == 'M'))
 		{
 			$request->sexo									= 'M';

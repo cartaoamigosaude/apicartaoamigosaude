@@ -905,6 +905,15 @@ class AppController extends Controller
 		$payload->data_nascimento 				= $ano . "-" . $mes . "-". $dia;
 		$payload->cpfcnpj 						= $request->cpf;
 
+		if (($request->parentesco_id == 3) or ($request->parentesco_id == 6))
+		{
+			$idade 				    			= Carbon::createFromDate($payload->data_nascimento)->age;
+			if ($idade > 21)
+			{
+				return response()->json(['mensagem' => 'Irmãos e Netos não podem ser maior que 21 anos'], 404);
+			}
+		}
+
 		$cliente 								= Cas::storeUpdateCliente($payload);
 
 		$contrato                              	= \App\Models\Contrato::where('cliente_id','=',$cliente->id)
