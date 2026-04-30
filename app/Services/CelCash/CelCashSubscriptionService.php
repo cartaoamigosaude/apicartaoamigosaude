@@ -18,6 +18,67 @@ use App\Jobs\CelCashParcelaAvulsaJob;
 
 class CelCashSubscriptionService
 {
+    private static function prepararTransactionSubscription($transaction, $subscription)
+    {
+        $payload = json_decode(json_encode($transaction));
+
+        if ((! isset($payload->subscriptionGalaxPayId)) && (isset($subscription->galaxPayId))) {
+            $payload->subscriptionGalaxPayId = $subscription->galaxPayId;
+        }
+
+        if ((! isset($payload->subscriptionMyId)) && (isset($subscription->myId))) {
+            $payload->subscriptionMyId = $subscription->myId;
+        }
+
+        return $payload;
+    }
+
+    private static function sincronizarTransactionsSubscription($contrato, $subscription, $transactions, $galaxId = 1)
+    {
+        $retorno = new stdClass();
+        $retorno->ok = "S";
+        $retorno->transactions = array();
+
+        foreach ($transactions as $transaction) {
+            $payload = self::prepararTransactionSubscription($transaction, $subscription);
+
+            Log::info('celcash.subscription.transaction_sync_inicio', [
+                'contrato_id' => $contrato->id ?? null,
+                'subscriptionGalaxPayId' => $payload->subscriptionGalaxPayId ?? null,
+                'transactionGalaxPayId' => $payload->galaxPayId ?? null,
+                'installment' => $payload->installment ?? null,
+                'payday' => $payload->payday ?? null,
+                'status' => $payload->status ?? null,
+            ]);
+
+            $migracao = CelCash::CelCashMigrarTransaction($payload, $galaxId, 'C');
+
+            if (! $migracao->ok) {
+                Log::warning('celcash.subscription.transaction_sync_falha', [
+                    'contrato_id' => $contrato->id ?? null,
+                    'subscriptionGalaxPayId' => $payload->subscriptionGalaxPayId ?? null,
+                    'transactionGalaxPayId' => $payload->galaxPayId ?? null,
+                    'installment' => $payload->installment ?? null,
+                    'payday' => $payload->payday ?? null,
+                    'status' => $payload->status ?? null,
+                    'erro' => $migracao->mensagem ?? null,
+                ]);
+                continue;
+            }
+
+            Log::info('celcash.subscription.transaction_sync_sucesso', [
+                'contrato_id' => $contrato->id ?? null,
+                'subscriptionGalaxPayId' => $payload->subscriptionGalaxPayId ?? null,
+                'transactionGalaxPayId' => $payload->galaxPayId ?? null,
+                'installment' => $payload->installment ?? null,
+                'parcela_id' => $migracao->parcela_id ?? null,
+            ]);
+
+            $retorno->transactions[] = $migracao;
+        }
+
+        return $retorno;
+    }
 
     public static function GetSubscription($galaxPayIds,$galaxId=1)
     {
@@ -464,140 +525,8 @@ class CelCashSubscriptionService
 			} else {
 				$transactions[]									 = $celcash->Subscription->Transactions;
 			}
-			
-            foreach ($transactions as $transaction)
-            {
-					$parcela                       				= \App\Models\Parcela::where('contrato_id','=',$contrato->id)
-																					 ->where('nparcela','=',$transaction->installment)
-																					 ->first();
-					if (!isset($parcela->id))
-					{
-						$retorno->mensagem        				= "Parcela número " . $transaction->installment . ' não encontrada';
-						return $retorno;
-					}
-	
-					if (isset($transaction->fee))
-					{
-						$parcela->taxa					        = ($transaction->fee / 100);
-					}
-					
-					$parcela->galaxPayId			            = $transaction->galaxPayId;
-					$parcela->status				            = Cas::nulltoSpace($transaction->status);
-					$parcela->statusDescription		            = Cas::nulltoSpace($transaction->statusDescription);
-					if ((isset($transaction->statusDate)) and (Cas::temData($transaction->statusDate)))
-					{
-						$parcela->statusDate			        = $transaction->statusDate;
-					} 
-					$parcela->additionalInfo		            = Cas::nulltoSpace($transaction->additionalInfo);
-					if (isset($transaction->subscriptionMyId))
-					{
-						$parcela->subscriptionMyId		        = Cas::nulltoSpace($transaction->subscriptionMyId);
-					} 
-					if (isset($transaction->payedOutsideGalaxPay))
-					{
-						$parcela->payedOutsideGalaxPay	        = $transaction->payedOutsideGalaxPay;
-					} 
 
-					if ((isset($transaction->datetimeLastSentToOperator)) and (Cas::temData($transaction->datetimeLastSentToOperator)))
-					{
-						$parcela->datetimeLastSentToOperator    = $transaction->datetimeLastSentToOperator;
-					}
-				   
-					if (isset($transaction->tid))
-					{
-						$parcela->tid                           = $transaction->tid;
-					}
-
-					if (isset($transaction->authorizationCode))
-					{
-						$parcela->authorizationCode             = $transaction->authorizationCode;
-					}
-
-					if (isset($transaction->cardOperatorId))
-					{
-						$parcela->cardOperatorId                = $transaction->cardOperatorId;
-					}
-
-					if ((isset($transaction->ConciliationOccurrences)) and (is_array($transaction->ConciliationOccurrences)))
-					{
-						$parcela->conciliationOccurrences        = json_encode($transaction->ConciliationOccurrences);
-					}
-
-					if (isset($transaction->CreditCard))
-					{
-						$parcela->creditCard                    = json_encode($transaction->CreditCard);
-					}
-
-					if (isset($transaction->Boleto))
-					{
-						if (isset($transaction->Boleto->pdf))
-						{
-							$parcela->boletopdf				    = Cas::nulltoSpace($transaction->Boleto->pdf);
-						} 
-						if (isset($transaction->Boleto->bankLine))
-						{
-							$parcela->boletobankLine		    = Cas::nulltoSpace($transaction->Boleto->bankLine);
-						} 
-						if (isset($transaction->Boleto->bankNumber))
-						{
-							$parcela->boletobankNumber		    = Cas::nulltoSpace($transaction->Boleto->bankNumber);
-						} 
-						if (isset($transaction->Boleto->barCode))
-						{
-							$parcela->boletobarCode			    = Cas::nulltoSpace($transaction->Boleto->barCode);
-						} 
-						if (isset($transaction->Boleto->bankEmissor))
-						{
-							$parcela->boletobankEmissor		    = Cas::nulltoSpace($transaction->Boleto->bankEmissor);
-						} 
-						if (isset($transaction->Boleto->bankAgency))
-						{
-							$parcela->boletobankAgency		    = Cas::nulltoSpace($transaction->Boleto->bankAgency);
-						} 
-						if (isset($transaction->Boleto->bankAccount))
-						{
-							$parcela->boletobankAccount		    = Cas::nulltoSpace($transaction->Boleto->bankAccount);
-						} 
-					} else {
-						$parcela->boletopdf				    = "";
-						$parcela->boletobankLine		    = "";
-						$parcela->boletobankNumber		    = 0;
-						$parcela->boletobarCode			    = "";
-						$parcela->boletobankEmissor		    = "";
-						$parcela->boletobankAgency		    = "";
-						$parcela->boletobankAccount		    = "";
-					}
-					if (isset($transaction->Pix))
-					{
-						if (isset($transaction->Pix->reference))
-						{
-							$parcela->pixreference			= Cas::nulltoSpace($transaction->Pix->reference);
-						} 
-						if (isset($transaction->Pix->qrCode))
-						{
-							$parcela->pixqrCode				= Cas::nulltoSpace($transaction->Pix->qrCode);
-						} 
-						if (isset($transaction->Pix->image))
-						{
-							$parcela->piximage				= $transaction->Pix->image;
-						} 
-						if (isset($transaction->Pix->page))
-						{
-							$parcela->pixpage				= $transaction->Pix->page;
-						} 
-					} else {
-						$parcela->pixreference			   	= "";
-						$parcela->pixqrCode				    = "";
-						$parcela->piximage				    = "";
-						$parcela->pixpage				    = "";
-					}
-
-					if (!$parcela->save())
-					{
-						$retorno->mensagem          		= "Ocorreu problema na tentativa de atualizar a parcela número: " . $transaction->galaxPayId;
-						return $retorno;
-					}
-            }
+            $retorno->sincronizacao = self::sincronizarTransactionsSubscription($contrato, $celcash->Subscription, $transactions, 1);
         } 
         
 		$retorno->ok                     					= "S";

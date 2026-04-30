@@ -18,6 +18,24 @@ use App\Jobs\CelCashParcelaAvulsaJob;
 
 class CelCashWebhookService
 {
+    private static function prepararPayloadTransaction($transaction, $subscription = null, $event = '')
+    {
+        $payload = json_decode(json_encode($transaction));
+
+        if ((! isset($payload->subscriptionGalaxPayId)) && (isset($subscription->galaxPayId))) {
+            $payload->subscriptionGalaxPayId = $subscription->galaxPayId;
+        }
+
+        if ((! isset($payload->subscriptionMyId)) && (isset($subscription->myId))) {
+            $payload->subscriptionMyId = $subscription->myId;
+        }
+
+        if ($event != '') {
+            $payload->event = $event;
+        }
+
+        return $payload;
+    }
 
     public static function celcashWebhook($celcash)
     {
@@ -88,8 +106,11 @@ class CelCashWebhookService
                         }
                         if (isset($celcash->Transaction))
                         {
-                            $payload			    = json_decode(json_encode($celcash->Transaction));
-							$payload->event 		= $celcash->event;
+                            $payload			    = self::prepararPayloadTransaction(
+                                $celcash->Transaction,
+                                $celcash->Subscription ?? null,
+                                $celcash->event
+                            );
                             $retorno->transaction   = CelCash::CelCashMigrarTransaction($payload,$galaxId,'C');
                         }
                         return $retorno;
@@ -97,19 +118,25 @@ class CelCashWebhookService
                         Log::info("transaction.updateStatus", ['celcash' => $celcash ]);
                     }
                 case 'subscription.addTransaction':
-					/*
-					 if ((isset($celcash->Subscription)) or (isset($celcash->Charge)) or (isset($celcash->Transaction)))
-					 {
-						$retorno 				    = new stdClass();
-                        if (isset($celcash->Subscription))
-                        {
-                            $payload			    = json_decode(json_encode($celcash->Subscription));
-                            $retorno->contrato      = CelCash::CelCashMigrarContrato($payload,$galaxId);
-                        } 
-						return $retorno;
-					 }
-					 */
-                    return 'subscription.addTransaction';
+                    $retorno = new stdClass();
+
+                    if (isset($celcash->Transaction))
+                    {
+                        $payload = self::prepararPayloadTransaction(
+                            $celcash->Transaction,
+                            $celcash->Subscription ?? null,
+                            $celcash->event
+                        );
+
+                        $retorno->transaction = CelCash::CelCashMigrarTransaction($payload, $galaxId, 'C');
+                        return $retorno;
+                    }
+
+                    Log::warning('celcash.subscription.addTransaction_sem_transaction', [
+                        'payload' => $celcash,
+                    ]);
+
+                    return $retorno;
             }
         }
 

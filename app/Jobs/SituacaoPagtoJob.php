@@ -8,7 +8,6 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-
 use Illuminate\Support\Facades\Log;
 use DB;
 
@@ -29,30 +28,23 @@ class SituacaoPagtoJob implements ShouldQueue, ShouldBeUnique
     {
         Log::info('Iniciando o job SituacaoPagtoJob (Regra Final com Validade).');
 
-        // Data limite para inadimplência por vencimento
+        // Data limite para inadimplencia por vencimento.
         $dataLimiteAtraso = now()->subDays(9)->toDateString();
-        
-        // Data limite para inadimplência por falta de atividade (pagamento antigo)
+
+        // Data limite para inadimplencia por falta de atividade (pagamento antigo).
         $dataLimiteValidadePagto = now()->subMonth()->subDays(9)->toDateString();
 
-        // Consulta Otimizada para a Regra Final
         $contratosParaAtualizar = DB::table('contratos as c')
             ->join(DB::raw("(
-                -- Subconsulta para obter a ÚLTIMA parcela e a PRIMEIRA parcela em aberto
                 SELECT
                     p.contrato_id,
-                    ROW_NUMBER() OVER (PARTITION BY p.contrato_id ORDER BY p.data_vencimento DESC, p.id DESC) as rn_desc,
                     ROW_NUMBER() OVER (
-                        PARTITION BY p.contrato_id,
-                        CASE
-                            -- Parcela em aberto para a rotina: sem pagamento e sem baixa.
-                            WHEN p.data_pagamento IS NULL AND p.data_baixa IS NULL THEN 1
-                            ELSE 0
-                        END
-                        ORDER BY p.data_vencimento ASC, p.id ASC
-                    ) as rn_asc,
+                        PARTITION BY p.contrato_id
+                        ORDER BY p.data_vencimento DESC, p.id DESC
+                    ) as rn_desc,
                     p.data_vencimento,
-                    p.data_pagamento
+                    p.data_pagamento,
+                    p.data_baixa
                 FROM parcelas p
             ) as p_info"), 'c.id', '=', 'p_info.contrato_id')
             ->select(
@@ -60,20 +52,18 @@ class SituacaoPagtoJob implements ShouldQueue, ShouldBeUnique
                 'c.situacao_pagto as situacao_pagto_original',
                 DB::raw("
                     CASE
-                        -- CENÁRIO A: A última parcela (rn_desc=1) está PAGA?
                         WHEN MAX(CASE WHEN p_info.rn_desc = 1 THEN p_info.data_pagamento END) IS NOT NULL THEN
-                            -- SIM. Agora, a data desse pagamento é mais antiga que o limite de validade?
                             CASE
-                                WHEN MAX(CASE WHEN p_info.rn_desc = 1 THEN p_info.data_pagamento END) < '{$dataLimiteValidadePagto}' THEN 'I' -- Se sim, INATIVO.
-                                ELSE 'A' -- Se não (pagamento recente), ATIVO.
+                                WHEN MAX(CASE WHEN p_info.rn_desc = 1 THEN p_info.data_pagamento END) < '{$dataLimiteValidadePagto}' THEN 'I'
+                                ELSE 'A'
                             END
-                        
-                        -- CENÁRIO B: A última parcela NÃO está paga.
                         ELSE
-                            -- NÃO. Então, a parcela vencida mais antiga (rn_asc=1) ultrapassou o limite de atraso?
                             CASE
-                                WHEN MAX(CASE WHEN p_info.rn_asc = 1 THEN p_info.data_vencimento END) < '{$dataLimiteAtraso}' THEN 'I' -- Se sim, INATIVO.
-                                ELSE 'A' -- Se não, ATIVO.
+                                WHEN MIN(CASE
+                                    WHEN p_info.data_pagamento IS NULL AND p_info.data_baixa IS NULL
+                                    THEN p_info.data_vencimento
+                                END) < '{$dataLimiteAtraso}' THEN 'I'
+                                ELSE 'A'
                             END
                     END AS situacao_pagto_calculado
                 ")
@@ -82,15 +72,11 @@ class SituacaoPagtoJob implements ShouldQueue, ShouldBeUnique
             ->groupBy('c.id', 'c.situacao_pagto')
             ->get();
 
-        // O código de atualização em massa permanece o mesmo...
         $this->atualizarContratos($contratosParaAtualizar);
 
         Log::info('Finalizando o job SituacaoPagtoJob (Regra Final com Validade).');
     }
 
-    /**
-     * Helper para executar a atualização dos contratos.
-     */
     private function atualizarContratos($contratos): void
     {
         $idsParaMarcarComoInativo = [];

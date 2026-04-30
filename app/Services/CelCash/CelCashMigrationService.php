@@ -734,7 +734,12 @@ class CelCashMigrationService
                 }
             }
         } 
-        $parcela->additionalInfo		            = Cas::nulltoSpace($celcash->additionalInfo);
+        if (isset($celcash->additionalInfo))
+        {
+            $parcela->additionalInfo		        = Cas::nulltoSpace($celcash->additionalInfo);
+        } else {
+            $parcela->additionalInfo		        = "";
+        }
 		if (isset($celcash->subscriptionMyId))
 		{
 			$parcela->subscriptionMyId		        = Cas::nulltoSpace($celcash->subscriptionMyId);
