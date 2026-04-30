@@ -406,7 +406,20 @@ class CelCashSubscriptionService
 			return $retorno;
 		}
 		
-		$contrato 			            			= \App\Models\Contrato::find($celcash->Subscription->myId);
+		$contratoId								= $celcash->Subscription->myId ?? null;
+		$contrato 			            			= null;
+
+		if (!empty($contratoId))
+		{
+			$contrato 							= \App\Models\Contrato::find($contratoId);
+		}
+
+		if (!isset($contrato->id))
+		{
+			$contrato 							= \App\Models\Contrato::where('galaxPayId','=',$celcash->Subscription->galaxPayId)
+														 ->where('tipocontrato','=','C')
+														 ->first();
+		}
 
         if (!isset($contrato->id)) 
         {
