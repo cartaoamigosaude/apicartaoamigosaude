@@ -1211,6 +1211,16 @@ class ParcelaController extends Controller
     {
         $parcela                                = \App\Models\Parcela::find($id);
 
+        if (!isset($parcela->id))
+        {
+            return response()->json(['error' => 'A parcela não foi encontrada', 'mensagem' => 'A parcela não foi encontrada'], 404);
+        }
+
+        if (empty($parcela->boletopdf))
+        {
+            return response()->json(['error' => 'O boleto desta parcela ainda não foi gerado', 'mensagem' => 'O boleto desta parcela ainda não foi gerado'], 422);
+        }
+
         $response                               = Http::get($parcela->boletopdf);
         return  response($response->body(), 200)->header('Content-Type', 'application/pdf');
     }
@@ -1308,6 +1318,9 @@ class ParcelaController extends Controller
 	public function gerar_boleto(Request $request, $id)
     {
         $parcela                                	= \App\Models\Parcela::find($id);
+        $responderErro                           = function ($mensagem, $status = 422) {
+            return response()->json(['error' => $mensagem, 'mensagem' => $mensagem], $status);
+        };
 
 		if (!isset($parcela->id))
         {
@@ -1333,14 +1346,20 @@ class ParcelaController extends Controller
 				{
 					$scharge 							= CelCash::updateContratoWithCharge($charges->Charge);
 				} else {
-					 return response()->json($charges, 404);
+                    $mensagem                          = $charges->mensagem ?? $charges->message ?? $charges->error ?? 'Ocorreu um erro não identificado na criação do boleto';
+					return $responderErro($mensagem, 404);
 				}
 			}
 		} else {
+            if (empty($parcela->data_vencimento))
+            {
+                return $responderErro('A parcela está sem data de vencimento para gerar o boleto');
+            }
+
 			$body									= new stdClass();
 			$body->myId								= $parcela->contrato_id . "#" . $parcela->id . "#" .  bin2hex(random_bytes(5));
 			$body->value							= intval($parcela->valor * 100);
-			$body->payday							= $parcela->vencimento;
+			$body->payday							= $parcela->data_vencimento;
 			$body->payedOutsideGalaxPay				= false;
 			$body->additionalInfo					= $parcela->additionalInfo;
 			$adicionar 								= CelCash::adicionarTransaction($contrato->galaxPayId,$body,'galaxPayId');
@@ -1348,9 +1367,14 @@ class ParcelaController extends Controller
 			{
 				return response()->json(['error' => "Ocorreu um erro não identificado na criação da parcela no CelCash"], 422);	
 			}
+            $parcela->chargeMyId                   = $body->myId;
 			$parcela->galaxPayId					= $adicionar->Transaction->galaxPayId;
 			$parcela->save();
 			$transaction   							= CelCash::CelCashMigrarTransaction($adicionar->Transaction,1,'C');
+            if ((!isset($transaction->ok)) or (!$transaction->ok))
+            {
+                return $responderErro('O boleto foi criado no CelCash, mas não foi possível sincronizar a parcela local');
+            }
 		}
 			
         return response()->json($id, 200);
