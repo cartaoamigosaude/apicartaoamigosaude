@@ -19,6 +19,55 @@ use App\Jobs\CelCashParcelaAvulsaJob;
 class CelCashMigrationService
 {
 
+    public static function garantirTitularPfAtivo($contrato): void
+    {
+        if ((!isset($contrato->id)) || ($contrato->tipo !== 'F'))
+        {
+            return;
+        }
+
+        if (!in_array((string) ($contrato->status ?? ''), ['active', 'waitingPayment']))
+        {
+            return;
+        }
+
+        $beneficiario = \App\Models\Beneficiario::where('contrato_id', '=', $contrato->id)
+                                                ->where('tipo', '=', 'T')
+                                                ->orderBy('id', 'asc')
+                                                ->first();
+
+        if (!isset($beneficiario->id))
+        {
+            $beneficiario = new \App\Models\Beneficiario();
+            $beneficiario->contrato_id = $contrato->id;
+        }
+
+        $beneficiario->cliente_id             = $contrato->cliente_id;
+        $beneficiario->vigencia_inicio        = $contrato->vigencia_inicio ?? date('Y-m-d');
+        $beneficiario->vigencia_fim           = '2999-12-31';
+        $beneficiario->idcartao               = 0;
+        $beneficiario->statuscartao           = true;
+        $beneficiario->desc_status            = 'ATIVO';
+        $beneficiario->codonix                = '';
+        $beneficiario->numerocartao           = '';
+        $beneficiario->data_inicio_associacao = null;
+        $beneficiario->data_vencimento        = null;
+        $beneficiario->tipo_usuario           = 'TITULAR';
+        $beneficiario->tipo                   = 'T';
+        $beneficiario->ativo                  = true;
+        $beneficiario->parent_id              = 0;
+        $beneficiario->parentesco_id          = 0;
+        $beneficiario->plano_id               = $contrato->plano_id ?? 0;
+
+        if (!$beneficiario->save())
+        {
+            Log::warning('celcash.contrato.titular_sync_falha', [
+                'contrato_id' => $contrato->id,
+                'cliente_id' => $contrato->cliente_id ?? null,
+            ]);
+        }
+    }
+
     public static function CelCashMigrarClientes($galaxId)
     {
         if (\Cache::has('cel_cash_startAt'))
@@ -528,6 +577,7 @@ class CelCashMigrationService
 			//{
 				if ($contrato->save())
 				{
+                    self::garantirTitularPfAtivo($contrato);
 					Log::info("ccelcash", ['contrato_id' => $contrato->id ]);
 				} else {
 					Log::info("ccelcash", ['celcash' => $celcash ]);

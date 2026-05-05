@@ -522,13 +522,15 @@ class CelCashSubscriptionService
             $contrato->paymentMethodPix      		= json_encode($celcash->Subscription->PaymentMethodPix);
         }
 		
-		if (!$contrato->save())
-		{
-			$retorno->mensagem          						= "Ocorreu problema na tentativa de atualizar o contrato número: " . $celcash->Subscription->galaxPayId;
-			return $retorno;
-		}
-		
-		if (isset($celcash->Subscription->Transactions))
+			if (!$contrato->save())
+			{
+				$retorno->mensagem          						= "Ocorreu problema na tentativa de atualizar o contrato número: " . $celcash->Subscription->galaxPayId;
+				return $retorno;
+			}
+
+            CelCashMigrationService::garantirTitularPfAtivo($contrato);
+			
+			if (isset($celcash->Subscription->Transactions))
         {
 			$transactions 										= array();
 			
