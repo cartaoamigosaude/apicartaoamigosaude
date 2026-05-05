@@ -1088,7 +1088,7 @@ class CasAppController extends Controller
 
 				if (isset($contrato->id))
 				{
-					return response()->json(['mensagem' => 'Dependente tem pendência financeira. Entre em contato com o Cartão no Whatsapp: (19) 98951-2404'], 422);
+					return response()->json(['mensagem' => 'Não foi possível cadastrar este dependente porque o CPF informado possui pendência financeira. Para regularizar ou tirar dúvidas, entre em contato com o Cartão no WhatsApp: (19) 98951-2404'], 422);
 				}
 
 				$jaexiste                           			= \App\Models\Beneficiario::with('contrato')

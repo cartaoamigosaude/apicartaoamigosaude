@@ -2373,6 +2373,7 @@ class ContratoController extends Controller
 		
 		$nparcelas 									= 0;
 		$payload									= (object) $request->all();	
+		DB::beginTransaction();
 		
 		foreach ($payload->parcelas as $parcela)
 		{
@@ -2382,6 +2383,14 @@ class ContratoController extends Controller
 			{
 				$nparcelas							= $parcela->nparcela;
 			}
+		}
+		
+		$nparcelas									= \App\Models\Parcela::where('contrato_id','=',$request->contrato_id)
+															->lockForUpdate()
+															->max('nparcela');
+		if (!is_numeric($nparcelas))
+		{
+			$nparcelas								= 0;
 		}
 		
 		$rparcela 								= new \App\Models\Parcela();
@@ -2419,11 +2428,13 @@ class ContratoController extends Controller
 		$rparcela->tid							= "";
 		$rparcela->authorizationCode			= "";
 		$rparcela->cardOperatorId				= "";
+		$rparcela->chargeMyId					= "";
 		$rparcela->conciliationOccurrences		= "{}";
 		$rparcela->creditCard					= "{}";
 		
 		if (!$rparcela->save())
 		{
+			DB::rollBack();
 			return response()->json(['error' => "Ocorreu um erro não identificado na criação da parcela"], 422);	
 		}
 		
@@ -2436,6 +2447,14 @@ class ContratoController extends Controller
 				if (($charges->ok == 'S') and (isset($charges->Charge)))
 				{
 					$scharge 							= CelCash::updateContratoWithCharge($charges->Charge);
+					if ((!isset($scharge->ok)) or ($scharge->ok != 'S'))
+					{
+						DB::rollBack();
+						return response()->json(['error' => "Ocorreu um erro nÃ£o identificado na criaÃ§Ã£o da parcela no CelCash"], 422);
+					}
+				} else {
+					DB::rollBack();
+					return response()->json(['error' => "Ocorreu um erro nÃ£o identificado na criaÃ§Ã£o da parcela no CelCash"], 422);
 				}
 			} else {
 				$body									= new stdClass();
@@ -2444,16 +2463,26 @@ class ContratoController extends Controller
 				$body->payday							= $request->vencimento;
 				$body->payedOutsideGalaxPay				= false;
 				$body->additionalInfo					= $rparcela->additionalInfo;
+				$rparcela->chargeMyId					= $body->myId;
+				$rparcela->save();
 				$adicionar 								= CelCash::adicionarTransaction($contrato->galaxPayId,$body,'galaxPayId');
 				if (($adicionar->statcode != 200) or (!isset($adicionar->type)) or (!$adicionar->type))
 				{
+					DB::rollBack();
 					return response()->json(['error' => "Ocorreu um erro não identificado na criação da parcela no CelCash"], 422);	
 				}
 				$rparcela->galaxPayId					= $adicionar->Transaction->galaxPayId;
 				$rparcela->save();
 				$transaction   							= CelCash::CelCashMigrarTransaction($adicionar->Transaction,1,'C');
+				if ((!isset($transaction->ok)) or (!$transaction->ok))
+				{
+					DB::rollBack();
+					return response()->json(['error' => "Ocorreu um erro nÃ£o identificado na criaÃ§Ã£o da parcela no CelCash"], 422);
+				}
 			}
 		}
+		
+		DB::commit();
 		
 		$parcelas_falharam 							= array();
 		

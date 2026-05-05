@@ -612,6 +612,45 @@ class CelCashMigrationService
         return 0;
 	}
 
+    private static function extrairIdentificadorParcela($celcash)
+    {
+        if ((isset($celcash->chargeMyId)) and (substr_count($celcash->chargeMyId, '#') == 2))
+        {
+            return $celcash->chargeMyId;
+        }
+
+        if ((isset($celcash->myId)) and (substr_count($celcash->myId, '#') == 2))
+        {
+            return $celcash->myId;
+        }
+
+        return "";
+    }
+
+    private static function localizarParcelaPorIdentificador($contrato, $identificador)
+    {
+        if (($identificador == "") or (substr_count($identificador, '#') != 2))
+        {
+            return null;
+        }
+
+        list($contrato_id, $parcela_id, $hash) = explode("#", $identificador);
+
+        if (intval($contrato_id) != intval($contrato->id))
+        {
+            return null;
+        }
+
+        $parcela = \App\Models\Parcela::find($parcela_id);
+
+        if ((!isset($parcela->id)) or (intval($parcela->contrato_id) != intval($contrato->id)))
+        {
+            return null;
+        }
+
+        return $parcela;
+    }
+
     public static function CelCashMigrarTransaction($celcash,$galaxId=1,$tipocontrato='C')
     {
        //Log::info("CelCashMigrarTransaction", ['celcash' => $celcash ]);
@@ -646,13 +685,19 @@ class CelCashMigrationService
             return $retorno;
         }
 
-        $parcela                                   = \App\Models\Parcela::where('contrato_id','=',$contrato->id)
+        $identificadorParcela                      = self::extrairIdentificadorParcela($celcash);
+        $parcela                                   = self::localizarParcelaPorIdentificador($contrato, $identificadorParcela);
+
+        if (!isset($parcela->id))
+        {
+            $parcela                               = \App\Models\Parcela::where('contrato_id','=',$contrato->id)
 																		->where('galaxPayId','=',intval($celcash->galaxPayId))
                                                                         ->first();
+        }
 
         $novo                                       = false;
         
-        if (!isset($parcela->id))
+		if (!isset($parcela->id))
         {
 			 $parcela                               = \App\Models\Parcela::where('contrato_id','=',$contrato->id)
 																		 ->where('nparcela','=',intval($celcash->installment))
@@ -688,15 +733,18 @@ class CelCashMigrationService
 		{
 			$parcela->valor					        = $contrato->valor;
 		}
+		$parcela->desconto							= 0;
+		$parcela->juros								= 0;
+		$valorBaseParcela							= $novo ? $contrato->valor : $parcela->valor;
 		if ($celcash->installment !=1)
 		{
-			if ($contrato->valor > $value) 
+			if ($valorBaseParcela > $value) 
 			{
-				$parcela->desconto				    = $contrato->valor - $value;
+				$parcela->desconto				    = $valorBaseParcela - $value;
 			}
-			if ($contrato->valor < $value) 
+			if ($valorBaseParcela < $value) 
 			{
-				$parcela->juros					    = $value - $contrato->valor;
+				$parcela->juros					    = $value - $valorBaseParcela;
 			}
 		}
         $parcela->valor_pago			            = $value;
@@ -704,6 +752,10 @@ class CelCashMigrationService
         if ($novo)
         {
             $parcela->nparcela				        = $celcash->installment;
+        }
+        if ($identificadorParcela != "")
+        {
+            $parcela->chargeMyId                    = $identificadorParcela;
         }
         $parcela->galaxPayId			            = $celcash->galaxPayId;
         $parcela->status				            = Cas::nulltoSpace($celcash->status);
