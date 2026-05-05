@@ -9,6 +9,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use App\Helpers\Cas;
 use App\Helpers\Conexa;
 use Throwable;
 
@@ -47,24 +48,24 @@ class ConexaAtivarAdimplentesJob implements ShouldQueue
             $beneficiarios = DB::table('beneficiario_produto as bp')
                 ->join('beneficiarios as b', 'b.id', '=', 'bp.beneficiario_id')
                 ->join('contratos as c', 'c.id', '=', 'b.contrato_id')
-                ->leftJoin('beneficiarios as titular', function ($join) {
-                    $join->on('titular.contrato_id', '=', 'b.contrato_id')
-                         ->where('titular.tipo', '=', 'T');
-                })
+                ->join('clientes as cl', 'cl.id', '=', 'b.cliente_id')
+                ->where('bp.produto_id', '=', 4)
                 ->whereNotNull('bp.idintegracao')
                 ->where('bp.idintegracao', '!=', '')
-                ->where('bp.ativacao', '=', 1)
+                ->where('b.ativo', '=', 1)
+                ->whereIn('c.status', ['active', 'waitingPayment'])
                 ->where('c.situacao_pagto', '=', 'A')
-                ->whereNotNull('bp.produto_id')
                 ->select([
                     'bp.beneficiario_id',
                     'bp.idintegracao',
                     'bp.produto_id',
+                    'bp.ativacao',
                     'b.tipo as beneficiario_tipo',
                     'b.plano_id as beneficiario_plano_id',
                     'b.parent_id',
                     'c.plano_id as contrato_plano_id',
                     'c.tipo as contrato_tipo',
+                    'cl.cpfcnpj as cpf',
                 ])
                 ->get();
 
@@ -77,22 +78,62 @@ class ConexaAtivarAdimplentesJob implements ShouldQueue
                 $plano_id = $this->resolvePlanoId($benef);
 
                 try {
-                    $resultado = Conexa::activate($benef->idintegracao, $plano_id);
+                    $status = Conexa::buscarPacienteStatus($benef->cpf, $plano_id);
 
-                    if ($resultado->ok === 'S') {
+                    if ($status->ok === 'S' && isset($status->status) && strtoupper((string) $status->status) === 'ACTIVE') {
+                        if ($this->precisaSincronizarAtivacaoLocal($benef)) {
+                            $sincronizacao = $this->sincronizarAtivacaoLocal($benef);
+
+                            if ($sincronizacao->ok !== 'S') {
+                                $erros++;
+                                Log::warning("ConexaAtivarAdimplentesJob - Falha ao sincronizar ativação local", [
+                                    'beneficiario_id' => $benef->beneficiario_id,
+                                    'idintegracao'    => $benef->idintegracao,
+                                    'mensagem'        => $sincronizacao->mensagem ?? 'sem mensagem',
+                                ]);
+                                continue;
+                            }
+                        }
+
                         $sucesso++;
                         Log::info("ConexaAtivarAdimplentesJob - Ativado com sucesso", [
                             'beneficiario_id' => $benef->beneficiario_id,
                             'idintegracao'    => $benef->idintegracao,
                         ]);
-                    } else {
+                        continue;
+                    }
+
+                    $resultado = Conexa::activate($benef->idintegracao, $plano_id);
+
+                    if ($resultado->ok !== 'S') {
                         $erros++;
                         Log::warning("ConexaAtivarAdimplentesJob - Falha ao ativar", [
                             'beneficiario_id' => $benef->beneficiario_id,
                             'idintegracao'    => $benef->idintegracao,
                             'mensagem'        => $resultado->mensagem ?? 'sem mensagem',
                         ]);
+                        continue;
                     }
+
+                    if ($this->precisaSincronizarAtivacaoLocal($benef)) {
+                        $sincronizacao = $this->sincronizarAtivacaoLocal($benef);
+
+                        if ($sincronizacao->ok !== 'S') {
+                            $erros++;
+                            Log::warning("ConexaAtivarAdimplentesJob - Falha ao sincronizar ativação local", [
+                                'beneficiario_id' => $benef->beneficiario_id,
+                                'idintegracao'    => $benef->idintegracao,
+                                'mensagem'        => $sincronizacao->mensagem ?? 'sem mensagem',
+                            ]);
+                            continue;
+                        }
+                    }
+
+                    $sucesso++;
+                    Log::info("ConexaAtivarAdimplentesJob - Ativado com sucesso", [
+                        'beneficiario_id' => $benef->beneficiario_id,
+                        'idintegracao'    => $benef->idintegracao,
+                    ]);
                 } catch (Throwable $e) {
                     $erros++;
                     Log::error("ConexaAtivarAdimplentesJob - Erro ao processar beneficiário", [
@@ -142,6 +183,21 @@ class ConexaAtivarAdimplentesJob implements ShouldQueue
         }
 
         return 0;
+    }
+
+    private function precisaSincronizarAtivacaoLocal($benef): bool
+    {
+        return (int) ($benef->ativacao ?? 0) !== 1;
+    }
+
+    private function sincronizarAtivacaoLocal($benef)
+    {
+        return Cas::ativarDesativarProduto(
+            $benef->beneficiario_id,
+            (int) $benef->produto_id,
+            true,
+            (string) $benef->idintegracao
+        );
     }
 
     public function failed(Throwable $exception)
