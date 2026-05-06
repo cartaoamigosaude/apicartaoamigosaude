@@ -714,10 +714,19 @@ class CasAppController extends Controller
 			}
 			
 			if (Cas::nulltoSpace($agendamento->dmedico) != "")
-			{				
-				$recentActivitie->description				= $agendamento->dmedico . " • " . $agendamento->especialidade->nome;
+			{
+				$recentActivitie->description				= $agendamento->dmedico;
+				if (isset($agendamento->especialidade->nome))
+				{
+					$recentActivitie->description			.= " • " . $agendamento->especialidade->nome;
+				}
 			} else {
-				$recentActivitie->description				= $agendamento->especialidade->nome;
+				if (isset($agendamento->especialidade->nome))
+				{
+					$recentActivitie->description			= $agendamento->especialidade->nome;
+				} else {
+					$recentActivitie->description			= "";
+				}
 			}
 			
 			if (isset($agendamento->clinica->nome))
@@ -1397,7 +1406,12 @@ class CasAppController extends Controller
 			$clinica->telefone 					= $agendamento->clinica->telefone;
 		}
 		
-		$clinica->especialidade 				= $agendamento->especialidade->nome;
+		if (isset($agendamento->especialidade->nome))
+		{
+			$clinica->especialidade 				= $agendamento->especialidade->nome;
+		} else {
+			$clinica->especialidade 				= "";
+		}
 		$clinica->data							= "";
 		$clinica->hora							= "";
 		$clinica->vencimento					= "";

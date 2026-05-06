@@ -1937,7 +1937,12 @@ class AppController extends Controller
 			$clinica->telefone 					= $agendamento->clinica->telefone;
 		}
 		
-		$clinica->especialidade 				= $agendamento->especialidade->nome;
+		if (isset($agendamento->especialidade->nome))
+		{
+			$clinica->especialidade 				= $agendamento->especialidade->nome;
+		} else {
+			$clinica->especialidade 				= "";
+		}
 		$clinica->data							= "";
 		$clinica->hora							= "";
 		$clinica->vencimento					= "";
